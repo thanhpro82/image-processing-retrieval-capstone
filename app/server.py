@@ -42,7 +42,8 @@ def find_images(con: sqlite3.Connection, query: str, limit: int, region: str | N
     region_filter = "AND images.region = ?" if region else ""
     rows = con.execute(f"""
         SELECT images.image_path, images.entity_names, images.caption,
-               images.region, images.page_title, bm25(images_fts) AS score
+               images.region, images.page_title,
+               bm25(images_fts, 8.0, 2.0, 1.0, 3.0, 0.5) AS score
         FROM images_fts JOIN images ON images_fts.rowid = images.id
         WHERE images_fts MATCH ? {region_filter} ORDER BY score LIMIT ?
     """, (expression, region, limit) if region else (expression, limit)).fetchall()

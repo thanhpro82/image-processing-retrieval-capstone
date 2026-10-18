@@ -89,7 +89,7 @@ def main() -> None:
             entity_desc TEXT,
             search_text TEXT NOT NULL
         );
-        CREATE VIRTUAL TABLE images_fts USING fts5(search_text, content='images', content_rowid='id');
+        CREATE VIRTUAL TABLE images_fts USING fts5(names, caption, title, region, description);
         CREATE TABLE entity_region (entity_name TEXT NOT NULL, folded_name TEXT NOT NULL,
                                     region TEXT NOT NULL, folded_region TEXT NOT NULL,
                                     PRIMARY KEY(folded_name, folded_region));
@@ -111,7 +111,8 @@ def main() -> None:
         search_text = fold(" ".join((name_text, caption, page_title, region, branch, entity_desc)))
         con.execute("INSERT INTO images VALUES (?,?,?,?,?,?,?,?,?,?)",
                     (n, path, url, name_text, caption, page_title, region, branch, entity_desc, search_text))
-        con.execute("INSERT INTO images_fts(rowid,search_text) VALUES (?,?)", (n, search_text))
+        con.execute("INSERT INTO images_fts(rowid,names,caption,title,region,description) VALUES (?,?,?,?,?,?)",
+                    (n, fold(name_text), fold(caption), fold(page_title), fold(region), fold(entity_desc)))
         if region:
             relations.update((name, fold(name), region, fold(region)) for name in names)
         if n % 10000 == 0:

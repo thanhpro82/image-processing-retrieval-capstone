@@ -11,7 +11,7 @@ class SearchTests(unittest.TestCase):
         self.con.executescript("""
             CREATE TABLE images (id INTEGER PRIMARY KEY, image_path TEXT, entity_names TEXT,
                                  caption TEXT, region TEXT, page_title TEXT, search_text TEXT);
-            CREATE VIRTUAL TABLE images_fts USING fts5(search_text);
+            CREATE VIRTUAL TABLE images_fts USING fts5(names, caption, title, region, description);
             CREATE TABLE entity_region (entity_name TEXT, folded_name TEXT, region TEXT, folded_region TEXT);
         """)
         rows = [
@@ -24,7 +24,8 @@ class SearchTests(unittest.TestCase):
             value = fold(" ".join((name, caption, region)))
             self.con.execute("INSERT INTO images VALUES (?,?,?,?,?,?,?)",
                              (image_id, path, name, caption, region, name, value))
-            self.con.execute("INSERT INTO images_fts(rowid,search_text) VALUES (?,?)", (image_id, value))
+            self.con.execute("INSERT INTO images_fts(rowid,names,caption,title,region,description) VALUES (?,?,?,?,?,?)",
+                             (image_id, fold(name), fold(caption), fold(name), fold(region), ""))
         self.con.execute("INSERT INTO entity_region VALUES (?,?,?,?)",
                          ("Đại Nội Huế", fold("Đại Nội Huế"), "Huế", fold("Huế")))
 
