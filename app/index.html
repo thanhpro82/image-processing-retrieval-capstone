@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Image Processing · Corpus Explorer</title>
+  <style>
+    :root{font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:#172321;background:#f5f6f2}
+    *{box-sizing:border-box}body{margin:0}main{max-width:1180px;margin:auto;padding:32px 24px 80px}
+    header{display:flex;justify-content:space-between;align-items:center;gap:20px;border-bottom:1px solid #dce1da;padding-bottom:22px}
+    .brand{font-size:13px;font-weight:800;letter-spacing:.15em;text-transform:uppercase;color:#147453}.badge{border:1px solid #bfd4c7;border-radius:100px;padding:7px 12px;color:#326e55;font-size:12px;font-weight:700}
+    h1{font-size:clamp(38px,5vw,68px);letter-spacing:-.055em;line-height:1.03;margin:65px 0 16px;max-width:800px}
+    .lead{font-size:18px;line-height:1.6;color:#52605a;max-width:690px;margin:0 0 36px}
+    .search{display:flex;background:white;border:1px solid #cbd6cd;border-radius:15px;box-shadow:0 12px 35px #1a503915;overflow:hidden;max-width:950px}
+    input{flex:1;border:0;outline:0;font:inherit;font-size:18px;padding:20px 22px;min-width:0}
+    button{border:0;background:#147453;color:white;padding:0 26px;font:inherit;font-weight:750;cursor:pointer}button:hover{background:#0e6043}
+    .examples{display:flex;flex-wrap:wrap;gap:8px;margin-top:13px}.examples button{background:#e7eee8;color:#315442;padding:9px 12px;border-radius:9px;font-size:13px;font-weight:600}
+    .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:56px 0 38px}.metric{background:#e9efe9;padding:20px;border-radius:13px}.metric strong{display:block;font-size:27px;letter-spacing:-.04em}.metric span{font-size:13px;color:#596960}
+    .section-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:18px}h2{font-size:24px;letter-spacing:-.03em;margin:0}.meta{font-size:13px;color:#64746b}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}.card{background:white;border:1px solid #e1e6de;border-radius:13px;overflow:hidden;min-width:0}
+    .card img{width:100%;height:185px;object-fit:cover;background:#e2e7df;display:block}.card-body{padding:13px}.card-title{font-size:14px;font-weight:750;line-height:1.35;max-height:2.7em;overflow:hidden;margin:0 0 7px}.card p{font-size:12px;line-height:1.4;color:#64716b;margin:0;max-height:2.8em;overflow:hidden}.tag{display:inline-block;background:#edf3ed;color:#33644b;border-radius:5px;padding:4px 7px;font-size:11px;margin-bottom:9px}
+    .note{color:#64716b;font-size:13px;line-height:1.55;margin-top:24px}.empty{padding:45px 20px;border:1px dashed #bacbbd;border-radius:13px;color:#627268;text-align:center;background:#ffffff88}
+    @media(max-width:650px){main{padding:20px 16px 50px}header{padding-bottom:15px}h1{margin-top:45px}.search{display:block}input{width:100%;font-size:16px}button.submit{width:100%;padding:14px}.metrics{grid-template-columns:1fr;margin-top:36px}}
+  </style>
+</head>
+<body>
+<main>
+  <header><div class="brand">Capstone / Pain Point A</div><div class="badge">Local corpus · Verified assets</div></header>
+  <h1>Từ ảnh đã crawl đến dữ liệu có thể tìm kiếm.</h1>
+  <p class="lead">Xem bộ ảnh đã qua kiểm tra kỹ thuật, checksum và kiểm toán trùng byte. Tìm kiếm là baseline minh bạch theo metadata; các quan hệ chưa có nguồn sẽ không được suy đoán.</p>
+  <form class="search" id="search-form"><input id="query" name="q" placeholder="Ví dụ: bãi biển Nha Trang" autocomplete="off" required><button class="submit" type="submit">Tìm ảnh →</button></form>
+  <div class="examples"><button data-q="bãi biển Nha Trang">Một ý định</button><button data-q="lễ hội và ẩm thực Huế">Nhiều ý định</button><button data-q="lễ hội ở cùng tỉnh với Đại Nội Huế">Qua quan hệ địa bàn</button></div>
+  <div class="metrics"><div class="metric"><strong id="image-count">—</strong><span>ảnh khác nội dung byte đã kiểm tra</span></div><div class="metric"><strong id="url-count">—</strong><span>URL nguồn trong manifest</span></div><div class="metric"><strong id="issue-count">—</strong><span>file lỗi trong kiểm toán</span></div></div>
+  <div class="section-head"><h2>Kết quả</h2><span class="meta" id="result-meta">Nhập truy vấn để bắt đầu</span></div>
+  <div id="results" class="empty">Ảnh và metadata chỉ được phục vụ từ corpus cục bộ.</div>
+  <p class="note">Demo này không khẳng định ảnh đúng thực thể, không đánh giá nội dung nhạy cảm và không thay thế bước thẩm định của con người. Dữ liệu công ty không được đóng gói trong mã nguồn công khai.</p>
+</main>
+<script>
+const form=document.getElementById('search-form'),input=document.getElementById('query'),results=document.getElementById('results'),meta=document.getElementById('result-meta');
+const escapeHtml=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function loadSummary(){try{const r=await fetch('/api/summary'),s=await r.json();document.getElementById('image-count').textContent=(s.unique_processed_sha256??0).toLocaleString('vi-VN');document.getElementById('url-count').textContent=(s.unique_source_urls??0).toLocaleString('vi-VN');document.getElementById('issue-count').textContent=(s.invalid_count??0).toLocaleString('vi-VN')}catch{}}
+async function search(q){meta.textContent='Đang tìm…';results.className='empty';results.textContent='Đang đọc chỉ mục';try{const r=await fetch('/api/search?q='+encodeURIComponent(q)+'&limit=12'),s=await r.json();if(!r.ok)throw new Error(s.error||'Lỗi tìm kiếm');meta.textContent=`${s.type.replaceAll('_',' ')} · ${s.results.length} ảnh${s.resolved_region?' · '+s.resolved_region:''}`;if(!s.results.length){results.className='empty';results.textContent=s.reason||'Không tìm thấy ảnh phù hợp trong dữ liệu hiện có.';return}results.className='grid';results.innerHTML=s.results.map(x=>`<article class="card"><img src="${escapeHtml(x.image_url)}" loading="lazy" alt="${escapeHtml(x.entity_names)}"><div class="card-body"><span class="tag">${escapeHtml(x.region||'Chưa rõ địa bàn')}</span><h3 class="card-title">${escapeHtml(x.entity_names||x.page_title)}</h3><p>${escapeHtml(x.caption||x.page_title)}</p></div></article>`).join('')}catch(e){meta.textContent='Lỗi';results.className='empty';results.textContent=e.message}}
+form.addEventListener('submit',e=>{e.preventDefault();search(input.value)});document.querySelectorAll('[data-q]').forEach(b=>b.addEventListener('click',()=>{input.value=b.dataset.q;search(input.value)}));loadSummary();
+</script>
+</body>
+</html>

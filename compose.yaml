@@ -1,0 +1,8 @@
+services:
+  demo:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data/corpus_v1:/data:ro
+    restart: unless-stopped

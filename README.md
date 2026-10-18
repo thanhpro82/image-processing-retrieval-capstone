@@ -23,12 +23,20 @@ The scripts in `scripts/` expect authorized input files under `data/` or accept 
 
 If the same authorized Team 3 URL set has already been downloaded locally by the companion retrieval project, install `requirements-import.txt` and run `python scripts/import_local_corpus.py --source PATH_TO_ITS_DATA`. The importer matches canonical URL selections, verifies each WebP, records SHA-256, and creates hard links rather than copying the images. It leaves the source project untouched and records the source transform in `data/corpus_v1/assembled_manifest.jsonl`. It is resumable and does not upload data.
 
+After import, run `python scripts/verify_assembled_corpus.py` and inspect `data/corpus_v1/assembled_verification_report.json`. The report must confirm at least 80,000 distinct processed hashes and no invalid files before building the demo index:
+
+    python scripts/build_search_db.py --source PATH_TO_ITS_DATA
+    python -m unittest discover -s tests
+    docker compose up --build
+
+Open `http://localhost:8080`. Docker mounts `data/corpus_v1` read-only and does not put any company images in the public image or Git repository. `/healthz`, `/api/search?q=...`, and `/api/summary` are available for automated checks. The current search method is a SQLite FTS baseline over entity names, captions and region. Its multi-hop support is limited to explicitly recorded entity→region links; unsupported relations return no grounded answer. Full-corpus latency and relevance still require measurement.
+
 ## Planned deliverables
 
 - Resumable image screening pipeline with per-stage decisions and human-review queue
 - Reproducible evaluation of accuracy, throughput, resource use, and cost
-- At least 80,000 real images indexed for retrieval
-- Search API and web demo packaged with Docker Compose
+- At least 80,000 real images indexed for retrieval (integrity audit and full run pending)
+- Search API and web demo packaged with Docker Compose (lexical baseline implemented; full run pending)
 - Benchmark and technical documentation
 
 See the capstone brief provided with the authorized dataset for exact acceptance criteria.
