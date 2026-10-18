@@ -54,6 +54,13 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(found["results"], [])
         self.assertIn("reason", found)
 
+    def test_ambiguous_region_does_not_pick_one(self):
+        self.con.execute("INSERT INTO entity_region VALUES (?,?,?,?)",
+                         ("Đại Nội Huế", fold("Đại Nội Huế"), "Quảng Nam", fold("Quảng Nam")))
+        found = search(self.con, "lễ hội ở cùng tỉnh với Đại Nội Huế")
+        self.assertEqual(found["results"], [])
+        self.assertEqual(len(found["candidate_regions"]), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

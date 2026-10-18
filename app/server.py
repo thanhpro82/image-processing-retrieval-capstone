@@ -64,13 +64,19 @@ def search(con: sqlite3.Connection, query: str, limit: int = 10) -> dict:
         subject, reference = hop.group(1).strip(), hop.group(2).strip()
         reference = re.sub(r"^(ảnh|hình ảnh)\s+", "", reference, flags=re.I)
         regions = con.execute("""
-            SELECT region, count(*) AS n FROM entity_region
-            WHERE folded_name = ? OR folded_name LIKE ?
-            GROUP BY region ORDER BY n DESC LIMIT 3
-        """, (fold(reference), "%" + fold(reference) + "%")).fetchall()
+            SELECT region FROM entity_region WHERE folded_name = ? GROUP BY region LIMIT 3
+        """, (fold(reference),)).fetchall()
+        if not regions:
+            regions = con.execute("""
+                SELECT region FROM entity_region WHERE folded_name LIKE ? GROUP BY region LIMIT 3
+            """, ("%" + fold(reference) + "%",)).fetchall()
         if not regions:
             return {"type": "multi_hop", "query": query, "results": [],
                     "reason": "Không tìm thấy quan hệ địa bàn có nguồn cho thực thể tham chiếu."}
+        if len(regions) > 1:
+            return {"type": "multi_hop", "query": query, "results": [],
+                    "reason": "Tên thực thể tham chiếu gắn với nhiều địa bàn; cần chỉ rõ địa bàn.",
+                    "candidate_regions": [row["region"] for row in regions]}
         region = regions[0]["region"]
         results = find_images(con, subject, limit, region=region)
         return {"type": "multi_hop", "query": query, "resolved_region": region,
