@@ -14,6 +14,7 @@ import os
 import sys
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -60,7 +61,10 @@ def import_one(source: Path, selected: dict, source_id: str, output: Path) -> di
     destination.parent.mkdir(parents=True, exist_ok=True)
     if not destination.exists():
         # Never silently copy gigabytes when hard links cannot be created.
-        os.link(source, destination)
+        try:
+            os.link(source, destination)
+        except FileExistsError:
+            pass
     if destination.stat().st_size != source.stat().st_size:
         raise ValueError(f"Size mismatch after hard link: {source}")
     return {
@@ -83,6 +87,7 @@ def main() -> None:
                         help="Directory containing manifest.parquet, status.parquet and images/")
     parser.add_argument("--output", type=Path, default=DESTINATION)
     parser.add_argument("--limit", type=int, default=None, help="Import only this many new files for a smoke test")
+    parser.add_argument("--workers", type=int, default=4)
     args = parser.parse_args()
     if sys.platform == "win32":
         # A long local import should continue if the user leaves the PC idle.
@@ -115,17 +120,24 @@ def main() -> None:
     started = time.perf_counter()
     errors = Counter()
     with imported_path.open("a", encoding="utf-8", newline="\n") as log:
-        for i, (url, image_id, image_path) in enumerate(candidates, 1):
-            try:
-                result = import_one(image_path, selected_by_url[url], image_id, output)
-            except (OSError, ValueError) as exc:
-                errors[f"{type(exc).__name__}: {exc}"[:160]] += 1
-                continue
-            imported[url] = result
-            log.write(json.dumps(result, ensure_ascii=False) + "\n")
-            if i % 500 == 0 or i == len(candidates):
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            for offset in range(0, len(candidates), 500):
+                chunk = candidates[offset:offset + 500]
+                futures = {
+                    pool.submit(import_one, image_path, selected_by_url[url], image_id, output): url
+                    for url, image_id, image_path in chunk
+                }
+                for future in as_completed(futures):
+                    url = futures[future]
+                    try:
+                        result = future.result()
+                    except (OSError, ValueError) as exc:
+                        errors[f"{type(exc).__name__}: {exc}"[:160]] += 1
+                        continue
+                    imported[url] = result
+                    log.write(json.dumps(result, ensure_ascii=False) + "\n")
                 log.flush()
-                print(f"imported={i}/{len(candidates)}", flush=True)
+                print(f"imported={min(offset + len(chunk), len(candidates))}/{len(candidates)}", flush=True)
 
     # Assemble one canonical row per selected URL. A verified local download takes
     # precedence; an imported file can replace a failed or unattempted download.
