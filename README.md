@@ -17,7 +17,9 @@ Python 3.12+ is recommended for the pilot scripts.
     python -m venv .venv
     .venv\Scripts\python.exe -m pip install -r requirements-pilot.txt
 
-The scripts in scripts/ expect local input files under data/ or accept paths as command-line arguments. scripts/scale_probe.py samples approved image URLs from a local canonical SQLite database and writes resumable results under data/scale_probe_10k/. It does not upload data to cloud storage.
+The scripts in `scripts/` expect authorized input files under `data/` or accept paths as command-line arguments. `scripts/scale_probe.py` samples approved image URLs from a local canonical SQLite database and writes resumable results under `data/scale_probe_10k/`. `scripts/build_corpus.py` then creates a larger content-addressed corpus. It checkpoints every batch, stops if free disk falls below 8 GiB, and pauses when DNS failures affect many sources. Resume temporary failures with `--retry-errors`; permanent HTTP failures remain recorded.
+
+`scripts/near_duplicate_probe.py` computes dHash candidates on either the scale probe or a full corpus (`--dataset path`). Candidate pairs require visual confirmation before removal. `scripts/evaluate_technical_filters.py` and `scripts/evaluate_embedding_classifier.py` measure screening baselines on a labeled pilot with entity-grouped holdouts. Their outputs are local; a classifier is not activated merely because it was evaluated.
 
 ## Planned deliverables
 
