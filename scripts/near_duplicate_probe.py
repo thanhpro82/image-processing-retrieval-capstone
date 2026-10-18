@@ -17,10 +17,11 @@ MAX_DISTANCE = 4
 
 
 def asset_key(row: dict) -> str:
-    key = row.get("processed_sha256") or row.get("source_sha256")
-    if not key:
-        raise ValueError("Valid image row lacks a content checksum")
-    return key
+    if row.get("processed_sha256"):
+        return "processed:" + row["processed_sha256"]
+    if row.get("source_sha256"):
+        return "source:" + row["source_sha256"]
+    raise ValueError("Valid image row lacks a content checksum")
 
 
 def image_file(dataset: Path, row: dict) -> Path:
@@ -71,7 +72,8 @@ def hash_unique(rows: list[dict], dataset: Path, workers: int) -> list[dict]:
                 if line.strip():
                     item = json.loads(line)
                     if item.get("hash_version") == HASH_VERSION:
-                        cached[item.get("asset_sha256") or item["source_sha256"]] = item["dhash"]
+                        key = item.get("asset_sha256") or "source:" + item["source_sha256"]
+                        cached[key] = item["dhash"]
     pending = [row for row in rows if asset_key(row) not in cached]
     print(f"unique={len(rows)} cached={len(cached)} pending={len(pending)}", flush=True)
     with cache_path.open("a", encoding="utf-8", newline="\n") as log:
@@ -115,8 +117,8 @@ def candidates(rows: list[dict], dataset: Path) -> list[dict]:
                 left_entities = {(link["batch"], link["entity_id"]) for link in left["entity_links"]}
                 right_entities = {(link["batch"], link["entity_id"]) for link in right["entity_links"]}
                 pairs.append({
-                    "left_sha256": asset_key(left),
-                    "right_sha256": asset_key(right),
+                    "left_asset_key": asset_key(left),
+                    "right_asset_key": asset_key(right),
                     "distance": distance,
                     "same_entity": bool(left_entities & right_entities),
                     "left_path": str(image_file(dataset, left)),
@@ -185,8 +187,8 @@ def main() -> None:
         return i
     index = {asset_key(row): i for i, row in enumerate(rows)}
     for pair in pairs:
-        a = find(index[pair["left_sha256"]])
-        b = find(index[pair["right_sha256"]])
+        a = find(index[pair["left_asset_key"]])
+        b = find(index[pair["right_asset_key"]])
         parent[b] = a
     clusters = Counter(find(i) for i in range(len(rows)))
     duplicate_upper_bound = sum(n - 1 for n in clusters.values() if n > 1)

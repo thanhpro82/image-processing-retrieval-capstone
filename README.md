@@ -31,6 +31,8 @@ After import, run `python scripts/verify_assembled_corpus.py` and inspect `data/
 
 Open `http://localhost:8080`. Docker mounts `data/corpus_v1` read-only and does not put any company images in the public image or Git repository. `/healthz`, `/api/search?q=...`, and `/api/summary` are available for automated checks. The current search method is a SQLite FTS baseline over entity names, captions and region. Its multi-hop support is limited to explicitly recorded entity→region links; unsupported relations return no grounded answer. Full-corpus latency and relevance still require measurement.
 
+With the demo running, `python scripts/benchmark_api.py` generates deterministic metadata-based cases for all three query types and measures API latency plus a small concurrent load probe. Its proxy hit metric does not replace independent human relevance judgments. The local JSON report and cases stay under `data/corpus_v1/`.
+
 ## Planned deliverables
 
 - Resumable image screening pipeline with per-stage decisions and human-review queue
