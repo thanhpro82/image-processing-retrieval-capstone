@@ -7,9 +7,11 @@ the final manifest records which pipeline produced each image.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import os
+import sys
 import time
 from collections import Counter
 from datetime import datetime, timezone
@@ -82,6 +84,9 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=DESTINATION)
     parser.add_argument("--limit", type=int, default=None, help="Import only this many new files for a smoke test")
     args = parser.parse_args()
+    if sys.platform == "win32":
+        # A long local import should continue if the user leaves the PC idle.
+        ctypes.windll.kernel32.SetThreadExecutionState(0x80000001)
     source = args.source.resolve()
     output = args.output.resolve()
     if source == output:
