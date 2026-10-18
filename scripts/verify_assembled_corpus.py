@@ -9,7 +9,9 @@ import os
 import sys
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 
 from PIL import Image
@@ -25,9 +27,30 @@ def hash_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def validate_image(corpus: Path, row: dict) -> tuple[str | None, str | None, str | None]:
+    path = corpus / row["image_path"]
+    if not path.is_file():
+        return None, None, "missing_file"
+    try:
+        with Image.open(path) as image:
+            image.load()
+            if image.format != "WEBP":
+                raise ValueError("not WebP")
+            dimensions = list(image.size)
+        if dimensions != row.get("processed_dimensions"):
+            raise ValueError("dimension mismatch")
+        actual_hash = hash_file(path)
+        if row.get("processed_sha256") and actual_hash != row["processed_sha256"]:
+            raise ValueError("processed checksum mismatch")
+    except (OSError, ValueError) as exc:
+        return None, None, str(exc)[:120]
+    return actual_hash, str(path), None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--corpus", type=Path, default=PROJECT / "data" / "corpus_v1")
+    parser.add_argument("--workers", type=int, default=4)
     args = parser.parse_args()
     if sys.platform == "win32":
         ctypes.windll.kernel32.SetThreadExecutionState(0x80000001)
@@ -42,41 +65,36 @@ def main() -> None:
     by_status = Counter()
     by_batch = Counter()
     started = time.perf_counter()
-    with manifest.open(encoding="utf-8") as stream:
-        for line_number, line in enumerate(stream, 1):
-            row = json.loads(line)
-            if line_number % 1000 == 0:
+    line_number = 0
+    with manifest.open(encoding="utf-8") as stream, ThreadPoolExecutor(max_workers=args.workers) as pool:
+        while True:
+            batch = [json.loads(line) for _, line in zip(range(500), stream)]
+            if not batch:
+                break
+            valid_batch = [(line_number + offset + 1, row) for offset, row in enumerate(batch)
+                           if row["status"] == "valid_image"]
+            checks = pool.map(partial(validate_image, corpus), (row for _, row in valid_batch))
+            checked = dict(zip((number for number, _ in valid_batch), checks, strict=True))
+            for row in batch:
+                line_number += 1
+                url = row["source_url"]
+                if url in selected_urls:
+                    invalid.append({"line": line_number, "reason": "duplicate_url"})
+                selected_urls.add(url)
+                by_status[row["status"]] += 1
+                if row["status"] != "valid_image":
+                    continue
+                actual_hash, path, error = checked[line_number]
+                if error:
+                    invalid.append({"line": line_number, "reason": error})
+                    continue
+                valid_rows += 1
+                unique_paths.add(path)
+                unique_hashes.setdefault(actual_hash, path)
+                by_origin[row.get("asset_origin", "unknown")] += 1
+                by_batch[str(row.get("batch", "unknown"))] += 1
+            if line_number % 1000 == 0 or line_number == len(batch):
                 print(f"checked_rows={line_number} valid_so_far={valid_rows}", flush=True)
-            url = row["source_url"]
-            if url in selected_urls:
-                invalid.append({"line": line_number, "reason": "duplicate_url"})
-            selected_urls.add(url)
-            by_status[row["status"]] += 1
-            if row["status"] != "valid_image":
-                continue
-            path = corpus / row["image_path"]
-            if not path.is_file():
-                invalid.append({"line": line_number, "reason": "missing_file"})
-                continue
-            try:
-                with Image.open(path) as image:
-                    image.load()
-                    if image.format != "WEBP":
-                        raise ValueError("not WebP")
-                    dimensions = list(image.size)
-                if dimensions != row.get("processed_dimensions"):
-                    raise ValueError("dimension mismatch")
-                actual_hash = row.get("processed_sha256") or hash_file(path)
-                if row.get("processed_sha256") and actual_hash != hash_file(path):
-                    raise ValueError("processed checksum mismatch")
-            except (OSError, ValueError) as exc:
-                invalid.append({"line": line_number, "reason": str(exc)[:120]})
-                continue
-            valid_rows += 1
-            unique_paths.add(str(path))
-            unique_hashes.setdefault(actual_hash, str(path))
-            by_origin[row.get("asset_origin", "unknown")] += 1
-            by_batch[str(row.get("batch", "unknown"))] += 1
     report = {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "manifest_rows": line_number,
