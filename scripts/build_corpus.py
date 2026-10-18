@@ -95,8 +95,16 @@ def retryable(result: dict) -> bool:
     status = result.get("http_status")
     error = result.get("error") or ""
     return status in (408, 429, 500, 502, 503, 504) or any(
-        word in error for word in ("URLError", "TimeoutError", "ConnectionResetError", "RemoteDisconnected")
+        word in error for word in (
+            "getaddrinfo failed", "timed out", "TimeoutError", "ConnectionResetError",
+            "RemoteDisconnected", "Temporary failure in name resolution",
+        )
     )
+
+
+def dns_failure(result: dict) -> bool:
+    error = result.get("error") or ""
+    return "getaddrinfo failed" in error or "Temporary failure in name resolution" in error
 
 
 def process_one(record: dict, incoming_dir: Path) -> dict:
@@ -175,7 +183,7 @@ def main() -> None:
         log.flush()
 
     pending = [row for row in selected if row["source_url"] not in results
-               or (args.retry_errors and results[row["source_url"]]["status"] != "valid_image")]
+               or (args.retry_errors and retryable(results[row["source_url"]]))]
     print(f"reused={reused} completed={len(results)} pending={len(pending)}", flush=True)
     if shutil.disk_usage(OUT).free < MIN_FREE_BYTES:
         raise RuntimeError("Less than 8 GiB free; corpus run not started")
@@ -188,8 +196,11 @@ def main() -> None:
                 for offset in range(0, len(pending), 500):
                     chunk = pending[offset:offset + 500]
                     futures = [pool.submit(process_one, row, incoming_dir) for row in chunk]
+                    chunk_dns_failures = 0
                     for future in as_completed(futures):
                         result = future.result()
+                        if dns_failure(result):
+                            chunk_dns_failures += 1
                         if result["status"] == "valid_image":
                             result = store_image(result, incoming_dir)
                         results[result["source_url"]] = result
@@ -209,6 +220,10 @@ def main() -> None:
                     }
                     write_atomic(OUT / "progress.json", progress)
                     print(f"new={processed}/{len(pending)} complete={len(results)}/{len(selected)} valid={valid} unique={len(unique_sha)}", flush=True)
+                    if chunk_dns_failures >= max(20, len(chunk) // 10):
+                        raise RuntimeError(
+                            f"Stopped safely: DNS failed for {chunk_dns_failures}/{len(chunk)} URLs in the latest chunk; resume with --retry-errors"
+                        )
                     if progress["free_bytes"] < MIN_FREE_BYTES:
                         raise RuntimeError("Stopped safely: less than 8 GiB free")
     finally:
