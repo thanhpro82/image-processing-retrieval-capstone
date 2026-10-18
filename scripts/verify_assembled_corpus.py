@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import os
+import sys
 import time
 from collections import Counter
 from datetime import datetime, timezone
@@ -27,6 +29,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--corpus", type=Path, default=PROJECT / "data" / "corpus_v1")
     args = parser.parse_args()
+    if sys.platform == "win32":
+        ctypes.windll.kernel32.SetThreadExecutionState(0x80000001)
     corpus = args.corpus.resolve()
     manifest = corpus / "assembled_manifest.jsonl"
     selected_urls = set()
