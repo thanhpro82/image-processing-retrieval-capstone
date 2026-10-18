@@ -17,6 +17,21 @@ flowchart LR
   I --> A[Search API and web demo]
 ```
 
+```mermaid
+erDiagram
+  CANONICAL_ROW }o--|| SOURCE_URL : selects
+  SOURCE_URL }o--|| PROCESSED_ASSET : resolves_to
+  SOURCE_URL ||--o{ ENTITY_LINK : belongs_to
+  PROCESSED_ASSET ||--|| SEARCH_IMAGE : indexes
+  SEARCH_IMAGE }o--o{ ENTITY_REGION : grounded_metadata
+  CANONICAL_ROW { string batch_entity_url_key string decision string reviewer string workbook }
+  SOURCE_URL { string url string status string origin }
+  PROCESSED_ASSET { string processed_sha256 string image_path int width int height }
+  ENTITY_LINK { string entity_id string entity_name int batch }
+  SEARCH_IMAGE { string image_path string caption string region }
+  ENTITY_REGION { string entity_name string region }
+```
+
 One source URL may be linked to several entities. The manifest retains all such links even when an image file is stored once. It records both the original URL and whether the processed WebP came from this project's downloader or an authorized local corpus. Imported assets carry a SHA-256 of the *processed WebP*, not a fabricated hash of unavailable original HTTP bytes. The two local transforms differ in resize and WebP quality, so their provenance stays visible.
 
 Original-byte hashes and processed-byte hashes use separate storage namespaces (`images/<prefix>/` and `images/imported/<prefix>/`). Their hexadecimal values must never share a filename namespace: a source image served as WebP can have the same bytes as another pipeline's processed output, while those pipelines may store different final bytes. The importer verifies the processed checksum after hard-linking and the full corpus audit checks it again.
