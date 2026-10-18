@@ -16,6 +16,13 @@ HASH_VERSION = "exif-dhash-9x8-lanczos-v1"
 MAX_DISTANCE = 4
 
 
+def asset_key(row: dict) -> str:
+    key = row.get("processed_sha256") or row.get("source_sha256")
+    if not key:
+        raise ValueError("Valid image row lacks a content checksum")
+    return key
+
+
 def image_file(dataset: Path, row: dict) -> Path:
     path = dataset / row["image_path"]
     if path.is_file():
@@ -39,9 +46,9 @@ def dhash(path: Path) -> int:
     return value
 
 
-def read_latest_results(dataset: Path) -> dict[str, dict]:
+def read_latest_results(path: Path) -> dict[str, dict]:
     latest = {}
-    with (dataset / "results.jsonl").open(encoding="utf-8") as stream:
+    with path.open(encoding="utf-8") as stream:
         for line in stream:
             if line.strip():
                 row = json.loads(line)
@@ -64,8 +71,8 @@ def hash_unique(rows: list[dict], dataset: Path, workers: int) -> list[dict]:
                 if line.strip():
                     item = json.loads(line)
                     if item.get("hash_version") == HASH_VERSION:
-                        cached[item["source_sha256"]] = item["dhash"]
-    pending = [row for row in rows if row["source_sha256"] not in cached]
+                        cached[item.get("asset_sha256") or item["source_sha256"]] = item["dhash"]
+    pending = [row for row in rows if asset_key(row) not in cached]
     print(f"unique={len(rows)} cached={len(cached)} pending={len(pending)}", flush=True)
     with cache_path.open("a", encoding="utf-8", newline="\n") as log:
         with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -75,16 +82,16 @@ def hash_unique(rows: list[dict], dataset: Path, workers: int) -> list[dict]:
                 for future in as_completed(futures):
                     row = futures[future]
                     value = future.result()
-                    cached[row["source_sha256"]] = f"{value:016x}"
+                    cached[asset_key(row)] = f"{value:016x}"
                     log.write(json.dumps({
-                        "source_sha256": row["source_sha256"],
+                        "asset_sha256": asset_key(row),
                         "hash_version": HASH_VERSION,
                         "dhash": f"{value:016x}",
                     }) + "\n")
                 log.flush()
                 print(f"hashed {min(offset + len(batch), len(pending))}/{len(pending)}", flush=True)
     for row in rows:
-        row["dhash"] = cached[row["source_sha256"]]
+        row["dhash"] = cached[asset_key(row)]
     return rows
 
 
@@ -108,8 +115,8 @@ def candidates(rows: list[dict], dataset: Path) -> list[dict]:
                 left_entities = {(link["batch"], link["entity_id"]) for link in left["entity_links"]}
                 right_entities = {(link["batch"], link["entity_id"]) for link in right["entity_links"]}
                 pairs.append({
-                    "left_sha256": left["source_sha256"],
-                    "right_sha256": right["source_sha256"],
+                    "left_sha256": asset_key(left),
+                    "right_sha256": asset_key(right),
                     "distance": distance,
                     "same_entity": bool(left_entities & right_entities),
                     "left_path": str(image_file(dataset, left)),
@@ -155,13 +162,14 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--contact-pairs", type=int, default=60)
     parser.add_argument("--dataset", type=Path, default=PROBE)
+    parser.add_argument("--results", type=Path, help="Defaults to dataset/results.jsonl")
     args = parser.parse_args()
     dataset = args.dataset.resolve()
-    latest = read_latest_results(dataset)
+    latest = read_latest_results(args.results.resolve() if args.results else dataset / "results.jsonl")
     unique = {}
     for row in latest.values():
         if row["status"] == "valid_image":
-            unique.setdefault(row["source_sha256"], row)
+            unique.setdefault(asset_key(row), row)
     rows = hash_unique(list(unique.values()), dataset, args.workers)
     pairs = candidates(rows, dataset)
     pair_path = dataset / "near_duplicate_candidates.jsonl"
@@ -175,7 +183,7 @@ def main() -> None:
             parent[i] = parent[parent[i]]
             i = parent[i]
         return i
-    index = {row["source_sha256"]: i for i, row in enumerate(rows)}
+    index = {asset_key(row): i for i, row in enumerate(rows)}
     for pair in pairs:
         a = find(index[pair["left_sha256"]])
         b = find(index[pair["right_sha256"]])
