@@ -16,6 +16,16 @@ HASH_VERSION = "exif-dhash-9x8-lanczos-v1"
 MAX_DISTANCE = 4
 
 
+def image_file(dataset: Path, row: dict) -> Path:
+    path = dataset / row["image_path"]
+    if path.is_file():
+        return path
+    legacy = dataset / "images" / row["image_path"]
+    if legacy.is_file():
+        return legacy
+    raise FileNotFoundError(path)
+
+
 def dhash(path: Path) -> int:
     # Adapted from Crawl Data/tools/image_review_pipeline.py.
     with Image.open(path) as image:
@@ -29,9 +39,9 @@ def dhash(path: Path) -> int:
     return value
 
 
-def read_latest_results() -> dict[str, dict]:
+def read_latest_results(dataset: Path) -> dict[str, dict]:
     latest = {}
-    with (PROBE / "results.jsonl").open(encoding="utf-8") as stream:
+    with (dataset / "results.jsonl").open(encoding="utf-8") as stream:
         for line in stream:
             if line.strip():
                 row = json.loads(line)
@@ -45,8 +55,8 @@ def atomic_json(path: Path, value: object) -> None:
     os.replace(temp, path)
 
 
-def hash_unique(rows: list[dict], workers: int) -> list[dict]:
-    cache_path = PROBE / "dhash_cache.jsonl"
+def hash_unique(rows: list[dict], dataset: Path, workers: int) -> list[dict]:
+    cache_path = dataset / "dhash_cache.jsonl"
     cached = {}
     if cache_path.exists():
         with cache_path.open(encoding="utf-8") as stream:
@@ -59,25 +69,26 @@ def hash_unique(rows: list[dict], workers: int) -> list[dict]:
     print(f"unique={len(rows)} cached={len(cached)} pending={len(pending)}", flush=True)
     with cache_path.open("a", encoding="utf-8", newline="\n") as log:
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(dhash, PROBE / "images" / row["image_path"]): row for row in pending}
-            for i, future in enumerate(as_completed(futures), 1):
-                row = futures[future]
-                value = future.result()
-                cached[row["source_sha256"]] = f"{value:016x}"
-                log.write(json.dumps({
-                    "source_sha256": row["source_sha256"],
-                    "hash_version": HASH_VERSION,
-                    "dhash": f"{value:016x}",
-                }) + "\n")
-                if i % 500 == 0 or i == len(pending):
-                    log.flush()
-                    print(f"hashed {i}/{len(pending)}", flush=True)
+            for offset in range(0, len(pending), 1000):
+                batch = pending[offset:offset + 1000]
+                futures = {pool.submit(dhash, image_file(dataset, row)): row for row in batch}
+                for future in as_completed(futures):
+                    row = futures[future]
+                    value = future.result()
+                    cached[row["source_sha256"]] = f"{value:016x}"
+                    log.write(json.dumps({
+                        "source_sha256": row["source_sha256"],
+                        "hash_version": HASH_VERSION,
+                        "dhash": f"{value:016x}",
+                    }) + "\n")
+                log.flush()
+                print(f"hashed {min(offset + len(batch), len(pending))}/{len(pending)}", flush=True)
     for row in rows:
         row["dhash"] = cached[row["source_sha256"]]
     return rows
 
 
-def candidates(rows: list[dict]) -> list[dict]:
+def candidates(rows: list[dict], dataset: Path) -> list[dict]:
     buckets = defaultdict(list)
     hashes = [int(row["dhash"], 16) for row in rows]
     pairs = []
@@ -101,16 +112,16 @@ def candidates(rows: list[dict]) -> list[dict]:
                     "right_sha256": right["source_sha256"],
                     "distance": distance,
                     "same_entity": bool(left_entities & right_entities),
-                    "left_path": str(PROBE / "images" / left["image_path"]),
-                    "right_path": str(PROBE / "images" / right["image_path"]),
+                    "left_path": str(image_file(dataset, left)),
+                    "right_path": str(image_file(dataset, right)),
                     "left_url": left["source_url"],
                     "right_url": right["source_url"],
                 })
     return pairs
 
 
-def contact_sheets(pairs: list[dict], limit: int) -> list[str]:
-    out = PROBE / "near_duplicate_sheets"
+def contact_sheets(pairs: list[dict], dataset: Path, limit: int) -> list[str]:
+    out = dataset / "near_duplicate_sheets"
     out.mkdir(exist_ok=True)
     by_group = defaultdict(list)
     for pair in pairs:
@@ -143,15 +154,17 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--contact-pairs", type=int, default=60)
+    parser.add_argument("--dataset", type=Path, default=PROBE)
     args = parser.parse_args()
-    latest = read_latest_results()
+    dataset = args.dataset.resolve()
+    latest = read_latest_results(dataset)
     unique = {}
     for row in latest.values():
         if row["status"] == "valid_image":
             unique.setdefault(row["source_sha256"], row)
-    rows = hash_unique(list(unique.values()), args.workers)
-    pairs = candidates(rows)
-    pair_path = PROBE / "near_duplicate_candidates.jsonl"
+    rows = hash_unique(list(unique.values()), dataset, args.workers)
+    pairs = candidates(rows, dataset)
+    pair_path = dataset / "near_duplicate_candidates.jsonl"
     with pair_path.open("w", encoding="utf-8", newline="\n") as stream:
         for pair in pairs:
             stream.write(json.dumps(pair, ensure_ascii=False) + "\n")
@@ -180,14 +193,14 @@ def main() -> None:
         "candidate_clusters": sum(n > 1 for n in clusters.values()),
         "max_images_removed_if_all_candidates_are_true_duplicates": duplicate_upper_bound,
         "candidate_files": str(pair_path),
-        "contact_sheets": contact_sheets(pairs, args.contact_pairs),
+        "contact_sheets": contact_sheets(pairs, dataset, args.contact_pairs),
         "limitations": [
             "dHash candidates are not verified duplicates; visual confirmation is required.",
             "dHash distance <=4 can miss crops, rotation, and changes in viewpoint.",
             "This probe counts exact-byte-unique images and dHash candidates only."
         ],
     }
-    atomic_json(PROBE / "near_duplicate_report.json", report)
+    atomic_json(dataset / "near_duplicate_report.json", report)
     print(json.dumps({k: v for k, v in report.items() if k not in ("contact_sheets", "limitations", "candidate_files")}, ensure_ascii=False), flush=True)
 
 
