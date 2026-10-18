@@ -19,6 +19,8 @@ flowchart LR
 
 One source URL may be linked to several entities. The manifest retains all such links even when an image file is stored once. It records both the original URL and whether the processed WebP came from this project's downloader or an authorized local corpus. Imported assets carry a SHA-256 of the *processed WebP*, not a fabricated hash of unavailable original HTTP bytes. The two local transforms differ in resize and WebP quality, so their provenance stays visible.
 
+Original-byte hashes and processed-byte hashes use separate storage namespaces (`images/<prefix>/` and `images/imported/<prefix>/`). Their hexadecimal values must never share a filename namespace: a source image served as WebP can have the same bytes as another pipeline's processed output, while those pipelines may store different final bytes. The importer verifies the processed checksum after hard-linking and the full corpus audit checks it again.
+
 The processing decisions are deliberately narrow. HTTP/decode failure, corrupted files, and exact-byte duplicates can be measured mechanically. A dHash distance of at most four only creates a review candidate; visually different images can share a small distance. Existing human `x` labels mix incorrect entity, duplicates, watermark, inaccessible sources and other causes, so they are not ground truth for any individual safety or quality failure. Baselines trained on this mixed label stay experimental unless they meet a predeclared false-reject constraint on held-out entities.
 
 ## Local storage and checkpoints

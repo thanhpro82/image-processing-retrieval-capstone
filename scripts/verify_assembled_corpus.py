@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,9 +37,12 @@ def main() -> None:
     by_origin = Counter()
     by_status = Counter()
     by_batch = Counter()
+    started = time.perf_counter()
     with manifest.open(encoding="utf-8") as stream:
         for line_number, line in enumerate(stream, 1):
             row = json.loads(line)
+            if line_number % 1000 == 0:
+                print(f"checked_rows={line_number} valid_so_far={valid_rows}", flush=True)
             url = row["source_url"]
             if url in selected_urls:
                 invalid.append({"line": line_number, "reason": "duplicate_url"})
@@ -69,8 +73,6 @@ def main() -> None:
             unique_hashes.setdefault(actual_hash, str(path))
             by_origin[row.get("asset_origin", "unknown")] += 1
             by_batch[str(row.get("batch", "unknown"))] += 1
-            if line_number % 10000 == 0:
-                print(f"checked={line_number}", flush=True)
     report = {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "manifest_rows": line_number,
@@ -84,6 +86,7 @@ def main() -> None:
         "valid_by_batch": dict(by_batch),
         "invalid_count": len(invalid),
         "invalid_first_50": invalid[:50],
+        "elapsed_seconds": round(time.perf_counter() - started, 2),
         "limitations": [
             "Exact processed SHA-256 uniqueness does not remove perceptually near-duplicate photos.",
             "This verifies file integrity and decoding, not entity relevance or image rights.",
