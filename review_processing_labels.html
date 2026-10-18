@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rà lý do giữ/bỏ ảnh — Capstone A</title>
+  <style>
+    :root { color-scheme: light; --ink:#172326; --muted:#617174; --line:#d7e0dc; --paper:#f4f7f4; --card:#fff; --accent:#176b56; --soft:#e6f3ee; --warn:#8b4a12; }
+    * { box-sizing:border-box }
+    body { margin:0; background:var(--paper); color:var(--ink); font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif }
+    header { padding:20px 26px 15px; background:#fff; border-bottom:1px solid var(--line) }
+    h1 { margin:0 0 5px; font-size:21px }
+    header p { margin:0; color:var(--muted) }
+    main { max-width:1500px; margin:auto; padding:18px; display:grid; grid-template-columns:minmax(420px,1.18fr) minmax(390px,.82fr); gap:16px }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; min-width:0 }
+    .setup { grid-column:1/-1; display:flex; gap:12px; flex-wrap:wrap; align-items:end }
+    .setup .field { min-width:220px }
+    label, .label { display:block; font-weight:650; margin-bottom:5px }
+    input[type=file], input[type=text], select, textarea { width:100%; padding:9px 10px; border:1px solid #bdcbc5; border-radius:8px; background:#fff; color:var(--ink); font:inherit }
+    input[type=file] { padding:7px }
+    textarea { min-height:68px; resize:vertical }
+    button { border:1px solid #b9c8c2; background:#fff; color:var(--ink); border-radius:8px; padding:9px 12px; font:600 14px system-ui; cursor:pointer }
+    button:hover { border-color:var(--accent); color:var(--accent) }
+    button.primary { background:var(--accent); color:white; border-color:var(--accent) }
+    button.primary:hover { background:#105542 }
+    button:disabled { opacity:.45; cursor:not-allowed }
+    .toolbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center }
+    .stats { margin-left:auto; color:var(--muted); font-size:13px }
+    .image-card { display:flex; flex-direction:column; gap:12px }
+    .image-wrap { min-height:420px; height:min(58vh,680px); display:grid; place-items:center; background:#edf1ef; border-radius:9px; overflow:hidden }
+    .image-wrap img { width:100%; height:100%; object-fit:contain }
+    .image-empty { color:var(--muted); text-align:center; max-width:380px; padding:25px }
+    .meta { display:grid; grid-template-columns:1fr 1fr; gap:7px 14px; color:var(--muted); font-size:13px }
+    .meta strong { color:var(--ink); font-weight:600 }
+    .entity { font-size:19px; margin:0 0 5px }
+    .description { color:#344447; margin:0; white-space:pre-wrap; max-height:115px; overflow:auto }
+    .source { display:flex; gap:14px; flex-wrap:wrap; font-size:13px }
+    a { color:#12634e }
+    .note { background:#f4f6f5; border-left:3px solid #98aaa2; padding:10px 12px; border-radius:5px; white-space:pre-wrap; max-height:145px; overflow:auto }
+    .right { display:flex; flex-direction:column; gap:15px }
+    .field-help { color:var(--muted); font-size:13px; margin:6px 0 0 }
+    .duplicate-panel { border:1px solid var(--line); border-radius:9px; padding:10px; background:#f8faf8 }
+    .duplicate-list { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:8px }
+    .duplicate-card { min-width:0; border:1px solid var(--line); border-radius:8px; padding:7px; background:white }
+    .duplicate-card img { width:100%; height:115px; object-fit:contain; background:#edf1ef; border-radius:5px }
+    .duplicate-card p { margin:5px 0; font-size:12px; overflow-wrap:anywhere }
+    .duplicate-card button { width:100%; padding:6px; font-size:12px }
+    .bottom { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap }
+    .hint { font-size:12px; color:var(--muted) }
+    .warning { background:#fff5e8; color:var(--warn); padding:10px 12px; border-radius:8px; font-size:13px }
+    .hidden { display:none !important }
+    #toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:#172326; color:#fff; padding:9px 14px; border-radius:8px; opacity:0; pointer-events:none; transition:opacity .2s }
+    #toast.show { opacity:1 }
+    @media (max-width:900px) { main { grid-template-columns:1fr } .image-wrap { height:48vh; min-height:300px } .setup { grid-column:auto } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Bổ sung lý do cho ảnh đã verify · Pain point A</h1>
+    <p>Nhãn giữ/bỏ đã có sẵn. Trang này chỉ giúp phân loại lý do ghi chú chưa rõ; không cần quyết định giữ/bỏ lần nữa.</p>
+  </header>
+  <main>
+    <section class="card setup">
+      <div class="field"><label for="csvFile">1. Chọn file kiểm toán CSV</label><input id="csvFile" type="file" accept=".csv,text/csv"></div>
+      <div class="field"><label for="imageFolder">2. Chọn thư mục ảnh pilot</label><input id="imageFolder" type="file" accept="image/*" webkitdirectory multiple></div>
+      <div class="field"><label for="filter">Lọc danh sách</label><select id="filter"><option value="needs">Chưa rà</option><option value="all">Tất cả</option><option value="done">Đã rà</option></select></div>
+      <div class="field"><label for="reviewer">Tên người rà (tuỳ chọn)</label><input id="reviewer" type="text" placeholder="Tên của bạn"></div>
+      <button id="export" class="primary" disabled>Xuất CSV đã rà</button>
+      <div id="progress" class="stats">Chưa nạp dữ liệu</div>
+      <div class="hint" style="flex-basis:100%">Chọn <code>processing_pilot_label_audit.csv</code> để trang có thông tin tất cả ảnh khi dò trùng; bộ lọc đưa các dòng cần rà lên trước. Sau đó chọn <code>data/pilot/images</code>.</div>
+    </section>
+
+    <section class="card image-card">
+      <div class="toolbar">
+        <button id="prev" disabled>← Trước</button><button id="next" disabled>Tiếp →</button>
+        <button id="skip" disabled>Bỏ qua dòng này</button>
+        <span id="position" class="stats">—</span>
+      </div>
+      <div class="image-wrap" id="imageWrap"><div class="image-empty">Nạp CSV và chọn thư mục ảnh để bắt đầu rà.</div></div>
+      <div class="toolbar"><button id="findNearDup" disabled>Tìm ảnh gần giống</button><span id="dupStatus" class="hint">So sánh ảnh trong thư mục pilot; kết quả chỉ là gợi ý.</span></div>
+      <div id="duplicatePanel" class="duplicate-panel hidden"></div>
+      <div>
+        <div class="meta" id="meta"></div>
+      </div>
+      <div>
+        <h2 id="entityName" class="entity">Entity</h2>
+        <p id="description" class="description"></p>
+      </div>
+      <div class="source" id="sourceLinks"></div>
+      <div><div class="label">Ghi chú verify ban đầu</div><div id="originalNote" class="note">—</div></div>
+    </section>
+
+    <section class="card right">
+      <div>
+        <label for="auditReason">Lý do chính</label>
+        <select id="auditReason">
+          <option value="">-- Chọn một lý do --</option>
+          <option value="wrong_entity_or_location">Ảnh sai entity / địa bàn</option>
+          <option value="duplicate_or_near_duplicate">Ảnh trùng / gần trùng</option>
+          <option value="low_resolution_or_quality">Ảnh mờ / chất lượng thấp</option>
+          <option value="watermark_or_text_overlay">Watermark / chữ / quảng cáo</option>
+          <option value="sensitive_content">Nội dung nhạy cảm</option>
+          <option value="unverifiable_or_unclear">Ảnh lỗi / không đủ căn cứ xác minh</option>
+          <option value="other_or_unclear">Khác / ghi chú không nêu rõ lý do</option>
+        </select>
+        <p class="field-help">Chọn một lý do chính. Nếu ảnh có nhiều vấn đề, ghi thêm vấn đề còn lại ở ô ghi chú.</p>
+      </div>
+      <div><label for="auditNote">Ghi chú của người rà</label><textarea id="auditNote" placeholder="Nêu dấu hiệu cụ thể nhìn thấy; nếu cần thêm ngữ cảnh, ghi rõ điều còn thiếu."></textarea></div>
+      <div class="warning">Không xác minh lại ảnh. Chỉ bổ sung lý do nếu thông tin hiện có chưa rõ. Không cần bổ sung thì cứ chuyển tiếp; nhãn verify ban đầu vẫn được giữ nguyên.</div>
+      <div class="bottom">
+        <span class="hint">Phím tắt: ← / → chuyển ảnh · Ctrl+S lưu</span>
+        <div class="toolbar"><button id="clear">Xoá phần bổ sung</button><button id="saveNext" class="primary" disabled>Tiếp theo (lý do tùy chọn)</button></div>
+      </div>
+    </section>
+  </main>
+  <div id="toast"></div>
+  <script>
+    (() => {
+      const $ = id => document.getElementById(id);
+      const csvInput = $('csvFile'), folderInput = $('imageFolder');
+      let rows = [], visible = [], cursor = 0, imageFiles = new Map(), audits = {}, storageKey = '', objectUrl = null;
+      let hashCache = {}, duplicateObjectUrls = [], catalogByFile = new Map(), reviewPool = [];
+
+      function parseCSV(text) {
+        text = text.replace(/^\uFEFF/, '');
+        const out = []; let row = [], cell = '', quoted = false;
+        for (let i=0; i<text.length; i++) {
+          const c = text[i];
+          if (quoted) {
+            if (c === '"' && text[i+1] === '"') { cell += '"'; i++; }
+            else if (c === '"') quoted = false;
+            else cell += c;
+          } else if (c === '"') quoted = true;
+          else if (c === ',') { row.push(cell); cell=''; }
+          else if (c === '\n') { row.push(cell.replace(/\r$/, '')); out.push(row); row=[]; cell=''; }
+          else cell += c;
+        }
+        if (cell.length || row.length) { row.push(cell.replace(/\r$/, '')); out.push(row); }
+        const headers = out.shift() || [];
+        return out.filter(r => r.some(v => v !== '')).map(r => Object.fromEntries(headers.map((h,i) => [h, r[i] ?? ''])));
+      }
+      function keyOf(r) { return [r.batch,r.stt,r.entity_id,r.source_url].join('|'); }
+      function fileName(path) { return (path || '').replaceAll('\\','/').split('/').pop(); }
+      function notify(message) { const t=$('toast'); t.textContent=message; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
+      function readForm() {
+        return {
+          reason: $('auditReason').value,
+          note: $('auditNote').value,
+          reviewer: $('reviewer').value.trim(),
+          audited_at: new Date().toISOString()
+        };
+      }
+      function persistCurrent(quiet=true) {
+        if (!rows.length || !visible.length) return;
+        const r=rows[visible[cursor]]; const audit=readForm();
+        if (audit.reason || audit.note) audits[keyOf(r)] = audit;
+        else delete audits[keyOf(r)];
+        try { localStorage.setItem(storageKey, JSON.stringify(audits)); if (!quiet) notify('Đã lưu tiến độ trên trình duyệt.'); }
+        catch { if (!quiet) notify('Không lưu được localStorage; hãy xuất CSV để giữ tiến độ.'); }
+        updateProgress();
+      }
+      function loadAudit(r) {
+        const a=audits[keyOf(r)] || {};
+        $('auditReason').value=a.reason || a.reasons?.[0] || (a.status==='process_note'?'other_or_unclear':a.status==='unclear'?'other_or_unclear':'');
+        $('auditNote').value=a.note||'';
+        if (a.reviewer && !$('reviewer').value) $('reviewer').value=a.reviewer;
+      }
+      function setImage(r) {
+        if (objectUrl) URL.revokeObjectURL(objectUrl); objectUrl=null;
+        duplicateObjectUrls.forEach(URL.revokeObjectURL); duplicateObjectUrls=[];
+        $('duplicatePanel').classList.add('hidden'); $('duplicatePanel').innerHTML='';
+        $('dupStatus').textContent='So sánh ảnh trong thư mục pilot; kết quả chỉ là gợi ý.';
+        const wrap=$('imageWrap'); wrap.innerHTML='';
+        const file=imageFiles.get(fileName(r.image_file || r.image_path));
+        $('findNearDup').disabled=!file || !imageFiles.size;
+        if (file) { objectUrl=URL.createObjectURL(file); const img=document.createElement('img'); img.src=objectUrl; img.alt=`Ảnh ${r.entity_name||''}`; wrap.append(img); }
+        else { const msg=document.createElement('div'); msg.className='image-empty'; msg.innerHTML='Chưa tìm thấy file ảnh. Hãy chọn thư mục <code>data/pilot/images</code> ở phía trên.'; wrap.append(msg); }
+      }
+      function render() {
+        const empty=!visible.length;
+        ['prev','next','skip','saveNext','export'].forEach(id=>$(id).disabled=empty);
+        $('position').textContent=empty?'Không có dòng trong bộ lọc':`${cursor+1} / ${visible.length}`;
+        if (empty) { $('meta').innerHTML=''; $('entityName').textContent=''; $('description').textContent=''; $('sourceLinks').innerHTML=''; $('originalNote').textContent='—'; $('imageWrap').innerHTML='<div class="image-empty">Không có dòng phù hợp bộ lọc.</div>'; updateProgress(); return; }
+        const r=rows[visible[cursor]];
+        setImage(r);
+        $('meta').innerHTML=`<span>Batch: <strong>${esc(r.batch)}</strong></span><span>STT: <strong>${esc(r.stt)}</strong></span><span>Entity ID: <strong>${esc(r.entity_id)}</strong></span><span>Nhãn gốc: <strong>${esc(r.human_label)}</strong></span><span>Ảnh tải: <strong>${esc(r.image_status)}</strong></span><span>Lý do gợi ý: <strong>${esc(r.normalized_reason)}</strong></span>`;
+        $('entityName').textContent=r.entity_name||'(không có tên entity)'; $('description').textContent=r.entity_description||'';
+        $('originalNote').textContent=r.original_note||'(không có ghi chú)';
+        const links=[];
+        if (r.source_url) links.push(`<a href="${escAttr(r.source_url)}" target="_blank" rel="noopener">Mở URL ảnh</a>`);
+        if (r.source_page) links.push(`<a href="${escAttr(r.source_page)}" target="_blank" rel="noopener">Mở trang nguồn</a>`);
+        $('sourceLinks').innerHTML=links.join(''); loadAudit(r); updateProgress();
+      }
+      function esc(s) { return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+      function escAttr(s) { return esc(s); }
+      function updateProgress() {
+        const done=reviewPool.filter(r=>audits[keyOf(r)]?.reason).length;
+        $('progress').textContent=rows.length?`${done} / ${reviewPool.length} dòng cần rà đã xong · ${imageFiles.size} ảnh đã nạp`: 'Chưa nạp dữ liệu';
+      }
+      function rebuildVisible() {
+        const f=$('filter').value;
+        visible=rows.map((_,i)=>i).filter(i=>{
+          const r=rows[i], a=audits[keyOf(r)];
+          const needsFlag=String(r.needs_reason_review||'').toLowerCase()==='true';
+          const inPool=reviewPool.includes(r);
+          return f==='all' || (f==='done' ? inPool && !!a?.reason : inPool && !a?.reason);
+        });
+        cursor=Math.min(cursor,Math.max(visible.length-1,0)); render();
+      }
+      function move(delta) { persistCurrent(true); if (!visible.length) return; cursor=(cursor+delta+visible.length)%visible.length; render(); }
+      function saveAndNext() {
+        if (!visible.length) return;
+        const a=readForm();
+        if (!a.reason) { persistCurrent(false); move(1); return; }
+        persistCurrent(false); $('filter').value='needs'; rebuildVisible();
+      }
+      function exportCSV() {
+        persistCurrent(true);
+        const extra=['audited_reason','audit_note','audit_reviewer','audited_at'];
+        const headers=[...Object.keys(rows[0]||{}),...extra];
+        const quote=v=>'"'+String(v??'').replaceAll('"','""')+'"';
+        const lines=[headers.map(quote).join(',')];
+        for (const r of rows) {
+          const a=audits[keyOf(r)]||{};
+          const values=[...headers.slice(0,headers.length-extra.length).map(h=>r[h]??''),a.reason||'',a.note||'',a.reviewer||'',a.audited_at||''];
+          lines.push(values.map(quote).join(','));
+        }
+        const blob=new Blob(['\uFEFF'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'});
+        const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='processing_pilot_reason_review_ANNOTATED.csv'; a.click(); URL.revokeObjectURL(url); notify('Đã xuất CSV đã rà.');
+      }
+      csvInput.addEventListener('change', async e=>{
+        const file=e.target.files?.[0]; if(!file)return;
+        try {
+          rows=parseCSV(await file.text());
+          if(!rows.length || !('batch' in rows[0]) || !('source_url' in rows[0])) throw new Error('CSV không đúng schema hàng đợi.');
+          const flagged=rows.filter(r=>String(r.needs_reason_review||'').toLowerCase()==='true');
+          reviewPool=flagged.length ? flagged : rows;
+          catalogByFile=new Map();
+          for(const r of rows){const n=fileName(r.image_file||r.image_path);if(n&&!catalogByFile.has(n))catalogByFile.set(n,r);}
+          storageKey='capstone-audit:'+rows.length+':'+keyOf(rows[0])+':'+keyOf(rows[rows.length-1]);
+          try { audits=JSON.parse(localStorage.getItem(storageKey)||'{}'); } catch { audits={}; }
+          try { hashCache=JSON.parse(localStorage.getItem(storageKey+':dhash')||'{}'); } catch { hashCache={}; }
+          $('filter').value='needs'; cursor=0; rebuildVisible(); $('export').disabled=false; notify(`Đã nạp ${rows.length} dòng; ${reviewPool.length} dòng cần rà.`);
+        } catch(err) { alert(`Không đọc được CSV: ${err.message}`); }
+      });
+      folderInput.addEventListener('change',e=>{
+        imageFiles=new Map();
+        for(const f of e.target.files||[]) imageFiles.set(f.name,f);
+        render(); notify(`Đã nạp danh sách ${imageFiles.size} file ảnh.`);
+      });
+      async function computeDhash(file) {
+        const cached=hashCache[file.name];
+        if(cached&&cached.size===file.size&&cached.lastModified===file.lastModified)return cached.hash;
+        const bitmap=await createImageBitmap(file);
+        const canvas=document.createElement('canvas');canvas.width=9;canvas.height=8;
+        const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(bitmap,0,0,9,8);bitmap.close();
+        const px=ctx.getImageData(0,0,9,8).data;let bits=0n;
+        const gray=[];
+        for(let y=0;y<8;y++)for(let x=0;x<9;x++){const i=(y*9+x)*4;gray.push(Math.round(.299*px[i]+.587*px[i+1]+.114*px[i+2]));}
+        for(let y=0;y<8;y++)for(let x=0;x<8;x++)bits=(bits<<1n)|BigInt(gray[y*9+x]>gray[y*9+x+1]?1:0);
+        const hash=bits.toString(16).padStart(16,'0');hashCache[file.name]={hash,size:file.size,lastModified:file.lastModified};return hash;
+      }
+      function hashDistance(a,b){let v=BigInt('0x'+a)^BigInt('0x'+b),n=0;while(v){n++;v&=v-1n;}return n;}
+      async function findSimilar() {
+        const row=rows[visible[cursor]], target=imageFiles.get(fileName(row.image_file||row.image_path));
+        if(!target){notify('Không tìm thấy ảnh hiện tại trong thư mục đã chọn.');return;}
+        const files=[...imageFiles.values()];$('findNearDup').disabled=true;
+        const hashes=new Map();let failed=0;
+        for(let i=0;i<files.length;i++){
+          try{hashes.set(files[i].name,await computeDhash(files[i]));}catch{failed++;}
+          if((i+1)%25===0||i===files.length-1){$('dupStatus').textContent=`Đang so sánh ảnh: ${i+1}/${files.length}${failed?` · lỗi ${failed}`:''}`;await new Promise(resolve=>setTimeout(resolve,0));}
+        }
+        try{localStorage.setItem(storageKey+':dhash',JSON.stringify(hashCache));}catch{}
+        const targetHash=hashes.get(target.name);$('findNearDup').disabled=false;
+        if(!targetHash){$('dupStatus').textContent='Không đọc được ảnh hiện tại để so sánh.';return;}
+        const matches=[];
+        for(const file of files){if(file.name===target.name)continue;const h=hashes.get(file.name);if(!h)continue;const distance=hashDistance(targetHash,h);if(distance<=8)matches.push({file,distance});}
+        matches.sort((a,b)=>a.distance-b.distance);
+        const panel=$('duplicatePanel');panel.classList.remove('hidden');panel.innerHTML='';
+        const title=document.createElement('strong');title.textContent=matches.length?`Ảnh gần giống (dHash ≤ 8): ${matches.length} kết quả`:'Không thấy ảnh gần giống trong ngưỡng dHash ≤ 8.';panel.append(title);
+        if(matches.length){const list=document.createElement('div');list.className='duplicate-list';
+          for(const match of matches.slice(0,6)){
+            const item=document.createElement('div');item.className='duplicate-card';
+            const img=document.createElement('img');const url=URL.createObjectURL(match.file);duplicateObjectUrls.push(url);img.src=url;img.alt='Ảnh gần giống';item.append(img);
+            const other=catalogByFile.get(match.file.name);const p=document.createElement('p');p.textContent=`dHash distance: ${match.distance} · ${other?`B${other.batch} STT ${other.stt} · ${other.entity_name}`:match.file.name}`;item.append(p);
+            const choose=document.createElement('button');choose.textContent='Ghi nhận là ảnh trùng';choose.addEventListener('click',()=>{
+              $('auditReason').value='duplicate_or_near_duplicate';
+              const detail=`Đã so trực quan với ${other?`B${other.batch} STT ${other.stt}`:match.file.name}; dHash distance=${match.distance}.`;
+              $('auditNote').value=$('auditNote').value?`${$('auditNote').value}\n${detail}`:detail;
+              persistCurrent(false);notify('Đã chọn lý do trùng; kiểm tra lại rồi bấm Lưu và tiếp theo.');
+            });item.append(choose);list.append(item);
+          }
+          panel.append(list);
+          const note=document.createElement('p');note.className='field-help';note.textContent='Hash chỉ tìm ảnh giống về hình thức. Hãy so ảnh bằng mắt trước khi ghi nhận; ảnh dùng cho hai entity khác nhau vẫn có thể hợp lệ.';panel.append(note);
+        }
+        $('dupStatus').textContent=`Đã so sánh ${hashes.size}/${files.length} ảnh.`;
+      }
+      $('filter').addEventListener('change',()=>{cursor=0;rebuildVisible();});
+      $('prev').addEventListener('click',()=>move(-1)); $('next').addEventListener('click',()=>move(1)); $('skip').addEventListener('click',()=>move(1));
+      $('saveNext').addEventListener('click',saveAndNext); $('export').addEventListener('click',exportCSV);
+      $('findNearDup').addEventListener('click',findSimilar);
+      $('clear').addEventListener('click',()=>{$('auditReason').value='';$('auditNote').value='';persistCurrent(false);});
+      $('auditReason').addEventListener('change',()=>persistCurrent(true));
+      $('auditNote').addEventListener('input',()=>persistCurrent(true)); $('reviewer').addEventListener('change',()=>persistCurrent(true));
+      document.addEventListener('keydown',e=>{
+        if(e.ctrlKey&&e.key.toLowerCase()==='s'){e.preventDefault();persistCurrent(false);return;}
+        if(e.target.matches('input,textarea,select'))return;
+        if(e.key==='ArrowLeft')move(-1); if(e.key==='ArrowRight')move(1);
+      });
+    })();
+  </script>
+</body>
+</html>

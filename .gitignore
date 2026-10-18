@@ -1,0 +1,29 @@
+# Company-provided data and derived artifacts stay local unless sharing is approved.
+data/
+outputs/
+*.xlsx
+*.xls
+*.csv
+*.parquet
+
+# Local credentials and environments.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+.venv/
+__pycache__/
+*.py[cod]
+
+# Local logs and caches.
+*.log
+.cache/
+
+# Internal company assignment and local analysis.
+ASSIGNMENT.txt
+NEW_CHAT_PROMPT.md
+docs/data_understanding.md
+docs/processing_a_baseline.md
+docs/implementation_plan.md
+scripts/download_team3_issues.py
