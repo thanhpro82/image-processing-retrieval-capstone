@@ -21,6 +21,8 @@ The scripts in `scripts/` expect authorized input files under `data/` or accept 
 
 `scripts/near_duplicate_probe.py` computes dHash candidates on either the scale probe or a full corpus (`--dataset path`). Candidate pairs require visual confirmation before removal. `scripts/evaluate_technical_filters.py` and `scripts/evaluate_embedding_classifier.py` measure screening baselines on a labeled pilot with entity-grouped holdouts. Their outputs are local; a classifier is not activated merely because it was evaluated.
 
+For a local visual quality check of full-corpus dHash candidates, run `python scripts/build_duplicate_review.py`. It creates an ignored HTML page with a deterministic stratified sample; choose whether each pair is the same photo, a distinct photo of a similar subject, different, or uncertain, then export labels as JSONL. Candidate pairs alone are never treated as verified duplicates.
+
 If the same authorized Team 3 URL set has already been downloaded locally by the companion retrieval project, install `requirements-import.txt` and run `python scripts/import_local_corpus.py --source PATH_TO_ITS_DATA`. The importer matches canonical URL selections, verifies each WebP, records SHA-256, and creates hard links rather than copying the images. It leaves the source project untouched and records the source transform in `data/corpus_v1/assembled_manifest.jsonl`. It is resumable and does not upload data.
 
 After import, run `python scripts/verify_assembled_corpus.py` and inspect `data/corpus_v1/assembled_verification_report.json`. The report must confirm at least 80,000 distinct processed hashes and no invalid files before building the demo index:
