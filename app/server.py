@@ -6,6 +6,7 @@ import os
 import re
 import sqlite3
 import unicodedata
+from contextlib import closing
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -13,7 +14,7 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 CORPUS = Path(os.environ.get("CORPUS_DIR", ROOT / "data" / "corpus_v1")).resolve()
-DB = CORPUS / "search.sqlite"
+DB = Path(os.environ.get("SEARCH_DB", CORPUS / "search.sqlite")).resolve()
 STOP_WORDS = {"anh", "hinh", "cho", "toi", "nhung", "cac", "cua", "ve", "mot", "o", "tai", "la"}
 
 
@@ -116,7 +117,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/healthz":
             if not DB.is_file():
                 return self.send_json({"status": "index_missing"}, HTTPStatus.SERVICE_UNAVAILABLE)
-            with connection() as con:
+            with closing(connection()) as con:
                 count = con.execute("SELECT count(*) FROM images").fetchone()[0]
             return self.send_json({"status": "ok", "indexed_images": count})
         if parsed.path == "/api/search":
@@ -126,7 +127,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "q is required"}, HTTPStatus.BAD_REQUEST)
             try:
                 limit = int(params.get("limit", ["10"])[0])
-                with connection() as con:
+                with closing(connection()) as con:
                     output = search(con, query, limit)
             except (ValueError, sqlite3.Error) as exc:
                 return self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)

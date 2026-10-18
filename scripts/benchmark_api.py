@@ -8,6 +8,7 @@ import argparse
 import json
 import random
 import sqlite3
+import sys
 import time
 import unicodedata
 from collections import defaultdict
@@ -47,9 +48,11 @@ def build_cases(db: Path, count: int, seed: int) -> list[dict]:
                         for name in text.split(" | ")
                         if 5 <= len(name.strip()) <= 65 and " và " not in name.lower()})
         region_map = defaultdict(set)
+        name_regions = defaultdict(set)
         for name, region in con.execute("SELECT entity_name, region FROM entity_region"):
             if 5 <= len(name) <= 65 and region:
                 region_map[region].add(name)
+                name_regions[fold(name)].add(region)
     if len(names) < count * 2:
         raise ValueError("Not enough distinct entity names for benchmark")
     singles = rng.sample(names, count)
@@ -57,7 +60,15 @@ def build_cases(db: Path, count: int, seed: int) -> list[dict]:
     pairs = rng.sample(names, count * 2)
     cases.extend({"type": "multi_intent", "query": f"{pairs[2*i]} và {pairs[2*i+1]}",
                   "expected_names": pairs[2*i:2*i+2]} for i in range(count))
-    eligible = [(region, sorted(group)) for region, group in region_map.items() if len(group) >= 2]
+    # Only generate grounded cases where both names map to exactly one region.
+    # Ambiguous references should be tested separately as deliberate no-answer cases.
+    eligible = [
+        (region, sorted(name for name in group
+                        if len(name_regions[fold(name)]) == 1
+                        and region in name_regions[fold(name)]))
+        for region, group in region_map.items()
+    ]
+    eligible = [(region, group) for region, group in eligible if len(group) >= 2]
     if len(eligible) < count:
         raise ValueError("Not enough regions with two grounded entities")
     for region, group in rng.sample(eligible, count):
@@ -82,6 +93,8 @@ def proxy_hit(case: dict, answer: dict) -> bool:
 
 
 def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:8080")
     parser.add_argument("--corpus", type=Path, default=PROJECT / "data" / "corpus_v1")

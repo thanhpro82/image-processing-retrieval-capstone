@@ -4,7 +4,7 @@ A project for automated post-crawl image screening, with a small retrieval produ
 
 ## Status
 
-Implementation is in progress. The repository currently contains data audit and pilot scripts; results from preliminary pilots are not a claim that the final 80,000-image or latency requirements have been met.
+The local, ignored corpus audit confirms more than 80,000 distinct processed image contents, and the Docker Compose demo indexes the assembled corpus. Full-corpus retrieval timings and processing findings are recorded locally under `data/analysis/` and are excluded from Git because they derive from company data. Pain Point A's semantic and safety filters remain experimental; current automatic decisions cover file integrity and exact duplicates, while dHash pairs go to review.
 
 ## Data handling
 
@@ -29,16 +29,17 @@ After import, run `python scripts/verify_assembled_corpus.py` and inspect `data/
     python -m unittest discover -s tests
     docker compose up --build
 
-Open `http://localhost:8080`. Docker mounts `data/corpus_v1` read-only and does not put any company images in the public image or Git repository. `/healthz`, `/api/search?q=...`, and `/api/summary` are available for automated checks. The current search method is a SQLite FTS baseline over entity names, captions and region. Its multi-hop support is limited to explicitly recorded entity→region links; unsupported relations return no grounded answer. Full-corpus latency and relevance still require measurement.
+If local port 8080 is already in use, set a different host port before starting Compose (PowerShell: `$env:DEMO_PORT=8081`).
+
+Open `http://localhost:8080`. Docker mounts `data/corpus_v1` read-only and copies the SQLite index into a named Linux volume at startup so queries do not scan the Windows bind mount. The container does not put any company images in the public image or Git repository. `/healthz`, `/api/search?q=...`, and `/api/summary` are available for automated checks. The current search method is a SQLite FTS baseline over entity names, captions and region. Its multi-hop support is limited to explicitly recorded entity→region links; unsupported relations return no grounded answer. API timings are available in the local report; independently judged relevance is still needed.
 
 With the demo running, `python scripts/benchmark_api.py` generates deterministic metadata-based cases for all three query types and measures API latency plus a small concurrent load probe. Its proxy hit metric does not replace independent human relevance judgments. The local JSON report and cases stay under `data/corpus_v1/`.
 
-## Planned deliverables
+## Remaining work
 
-- Resumable image screening pipeline with per-stage decisions and human-review queue
-- Reproducible evaluation of accuracy, throughput, resource use, and cost
-- At least 80,000 real images indexed for retrieval (integrity audit and full run pending)
-- Search API and web demo packaged with Docker Compose (lexical baseline implemented; full run pending)
-- Benchmark and technical documentation
+- Validate semantic, watermark and safety screening against reason-specific labels; do not treat mixed human `x` labels as one target
+- Add independent human relevance judgments for retrieval cases and report image-render latency separately
+- Measure the model inference, storage and cloud costs needed for a defensible 10–100M extrapolation
+- Complete a fresh-machine Docker Compose run and document first-start behavior
 
 See the capstone brief provided with the authorized dataset for exact acceptance criteria.

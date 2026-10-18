@@ -58,16 +58,19 @@ def main() -> None:
     metadata = pd.read_parquet(source / "manifest.parquet", columns=[
         "url", "entity_names", "caption", "page_title", "region", "branch", "entity_desc",
     ]).drop_duplicates("url").set_index("url")
-    by_path = {}
+    by_content = {}
     with (corpus / "assembled_manifest.jsonl").open(encoding="utf-8") as stream:
         for line in stream:
             row = json.loads(line)
             if row["status"] != "valid_image":
                 continue
             path = row["image_path"]
-            entry = by_path.setdefault(path, {"url": row["source_url"], "names": set()})
-            entry["names"].update(link["entity_name"] for link in row.get("entity_links", [])
-                                  if link.get("entity_name"))
+            key = row.get("processed_sha256") or path
+            entry = by_content.setdefault(key, {"path": path, "urls": {}})
+            entry["urls"].setdefault(row["source_url"], set()).update(
+                link["entity_name"] for link in row.get("entity_links", [])
+                if link.get("entity_name")
+            )
 
     destination = corpus / "search.sqlite"
     temp = destination.with_suffix(".sqlite.tmp")
@@ -96,28 +99,45 @@ def main() -> None:
         CREATE INDEX idx_entity_region_name ON entity_region(folded_name);
     """)
     relations = set()
-    for n, (path, entry) in enumerate(by_path.items(), 1):
-        url = entry["url"]
-        meta = metadata.loc[url] if url in metadata.index else None
-        names = set(entry["names"])
-        if meta is not None:
+    for n, entry in enumerate(by_content.values(), 1):
+        path = entry["path"]
+        urls = entry["urls"]
+        source_url = next(iter(urls))
+        names = set()
+        captions, titles, regions, branches, descriptions = set(), set(), set(), set(), set()
+        for url, linked_names in urls.items():
+            names.update(linked_names)
+            if url not in metadata.index:
+                continue
+            meta = metadata.loc[url]
             names.update(strings(meta["entity_names"]))
-        caption = plain(meta["caption"]) if meta is not None else ""
-        page_title = plain(meta["page_title"]) if meta is not None else ""
-        region = plain(meta["region"]) if meta is not None else ""
-        branch = plain(meta["branch"]) if meta is not None else ""
-        entity_desc = plain(meta["entity_desc"]) if meta is not None else ""
+            captions.update(strings(meta["caption"]))
+            titles.update(strings(meta["page_title"]))
+            regions.update(strings(meta["region"]))
+            branches.update(strings(meta["branch"]))
+            descriptions.update(strings(meta["entity_desc"]))
+        caption = " | ".join(sorted(captions))
+        page_title = " | ".join(sorted(titles))
+        region = " | ".join(sorted(regions))
+        branch = " | ".join(sorted(branches))
+        entity_desc = " | ".join(sorted(descriptions))
         name_text = " | ".join(sorted(names))
         search_text = fold(" ".join((name_text, caption, page_title, region, branch, entity_desc)))
         con.execute("INSERT INTO images VALUES (?,?,?,?,?,?,?,?,?,?)",
-                    (n, path, url, name_text, caption, page_title, region, branch, entity_desc, search_text))
+                    (n, path, source_url, name_text, caption, page_title, region, branch, entity_desc, search_text))
         con.execute("INSERT INTO images_fts(rowid,names,caption,title,region,description) VALUES (?,?,?,?,?,?)",
                     (n, fold(name_text), fold(caption), fold(page_title), fold(region), fold(entity_desc)))
-        if region:
-            relations.update((name, fold(name), region, fold(region)) for name in names)
+        for url, linked_names in urls.items():
+            if url not in metadata.index:
+                continue
+            meta = metadata.loc[url]
+            linked_names = set(linked_names) | set(strings(meta["entity_names"]))
+            for linked_region in strings(meta["region"]):
+                relations.update((name, fold(name), linked_region, fold(linked_region))
+                                 for name in linked_names)
         if n % 10000 == 0:
             con.commit()
-            print(f"indexed={n}/{len(by_path)}", flush=True)
+            print(f"indexed={n}/{len(by_content)}", flush=True)
     con.executemany("INSERT OR IGNORE INTO entity_region VALUES (?,?,?,?)", relations)
     con.commit()
     count = con.execute("SELECT count(*) FROM images").fetchone()[0]
