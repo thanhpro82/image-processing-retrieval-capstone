@@ -57,7 +57,9 @@ def import_one(source: Path, selected: dict, source_id: str, output: Path) -> di
         dimensions = list(image.size)
         image.verify()
     content_sha = sha256_file(source)
-    destination = output / "images" / content_sha[:2] / (content_sha + ".webp")
+    # The local downloader names files by original HTTP-byte SHA-256. Keep
+    # processed-byte hashes in a separate namespace to avoid cross-type keys.
+    destination = output / "images" / "imported" / content_sha[:2] / (content_sha + ".webp")
     destination.parent.mkdir(parents=True, exist_ok=True)
     if not destination.exists():
         # Never silently copy gigabytes when hard links cannot be created.
@@ -65,8 +67,8 @@ def import_one(source: Path, selected: dict, source_id: str, output: Path) -> di
             os.link(source, destination)
         except FileExistsError:
             pass
-    if destination.stat().st_size != source.stat().st_size:
-        raise ValueError(f"Size mismatch after hard link: {source}")
+    if destination.stat().st_size != source.stat().st_size or sha256_file(destination) != content_sha:
+        raise ValueError(f"Checksum mismatch after hard link: {source}")
     return {
         **selected,
         "status": "valid_image",
@@ -101,6 +103,8 @@ def main() -> None:
     existing = latest_by_url(output / "results.jsonl")
     imported_path = output / "imported_results.jsonl"
     imported = latest_by_url(imported_path)
+    imported = {url: row for url, row in imported.items()
+                if row["image_path"].replace("\\", "/").startswith("images/imported/")}
     manifest = pd.read_parquet(source / "manifest.parquet", columns=["image_id", "url"])
     status = pd.read_parquet(source / "status.parquet", columns=["image_id", "ok"])
     available = manifest.merge(status[status["ok"]], on="image_id", how="inner")
