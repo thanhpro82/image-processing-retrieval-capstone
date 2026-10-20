@@ -10,6 +10,13 @@ All metrics are tied to a named manifest version, code commit, machine, worker c
 4. **Human-label accuracy:** Join only reviewed-sheet keep/`x` labels by `(batch, entity_id, URL)`. Keep candidate-sheet `x` out of the negative class. Split by entity before threshold selection. Record confusion matrix, reject recall, good-image false-reject rate and coverage; select thresholds on calibration/validation and evaluate once on unseen test entities. Ambiguous reasons in notes do not become labels for watermark, safety or locality metrics without manual confirmation.
 5. **Throughput and cost:** Record end-to-end URLs/s and valid images/s separately from local decode/hash images/s and model inference images/s. Include p50/p95 per stage, peak RAM/VRAM, storage bytes, CPU/GPU hours and network bytes. Extrapolate to 10M and 100M using explicit assumptions about source availability, parallel workers and storage prices. Never present an extrapolation as a completed run.
 
+`scripts/build_processing_decisions.py` reports wall time for the technical
+decision gate over every manifest row and cross-tabulates its actions with
+human labels when `--labels-csv` is supplied for the pilot. `scripts/project_processing_scale.py`
+uses the measured CPU and download pilots for a separate resource projection;
+unknown prices stay unset. Neither report measures semantic/safety model
+inference, so neither is an end-to-end cost claim.
+
 ## Retrieval B
 
 The SQLite baseline indexes one row per distinct chosen image path, with entity names, captions and documented region links. `scripts/benchmark_api.py` waits for at least 80,000 indexed images, warms the API, then makes deterministic single-intent, multi-intent and entity→region multi-hop queries. It records HTTP request-to-JSON latency p50, p95, maximum and count at or above 3 seconds for each class. A concurrent 100-request probe measures requests/s. The same seed and index version allow repeat runs.

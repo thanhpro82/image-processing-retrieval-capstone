@@ -1,7 +1,8 @@
 import sqlite3
+import time
 import unittest
 
-from app.server import fold, search
+from app.server import find_images, fold, search, tokens
 
 
 class SearchTests(unittest.TestCase):
@@ -18,6 +19,8 @@ class SearchTests(unittest.TestCase):
             (1, "images/a.webp", "Bãi biển Nha Trang", "Bãi biển", "Khánh Hòa"),
             (2, "images/b.webp", "Lễ hội Huế", "Biểu diễn lễ hội", "Huế"),
             (3, "images/c.webp", "Ẩm thực Huế", "Món ăn", "Huế"),
+            (4, "images/d.webp", "Hồ nước", "Hồ giữa rừng", "Huế"),
+            (5, "images/e.webp", "Con hổ", "Hổ trong rừng", "Huế"),
         ]
         for row in rows:
             image_id, path, name, caption, region = row
@@ -40,6 +43,21 @@ class SearchTests(unittest.TestCase):
     def test_extra_unmatched_word_backs_off_to_a_matching_phrase(self):
         found = search(self.con, "bãi biển đẹp Nha Trang")
         self.assertEqual(found["results"][0]["image_url"], "/images/a.webp")
+
+    def test_tone_sensitive_result_does_not_confuse_tiger_with_lake(self):
+        found = search(self.con, "hình ảnh con hổ")
+        self.assertEqual([row["image_url"] for row in found["results"]], ["/images/e.webp"])
+
+    def test_stop_word_does_not_remove_accented_homophone(self):
+        self.assertEqual(tokens("trống trận trong sân"), ["trong", "tran", "san"])
+
+    def test_expired_search_budget_returns_without_scanning(self):
+        self.assertEqual(find_images(self.con, "lễ hội", 10,
+                                     deadline=time.perf_counter() - 1), [])
+
+    def test_long_ungrounded_query_does_not_fall_back_to_one_word(self):
+        found = search(self.con, "con vật sống trong rừng")
+        self.assertEqual(found["results"], [])
 
     def test_multi_intent_has_two_groups(self):
         found = search(self.con, "lễ hội và ẩm thực", limit=2)

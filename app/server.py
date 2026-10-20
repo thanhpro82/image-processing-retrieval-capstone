@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sqlite3
+import time
 import unicodedata
 from contextlib import closing
 from http import HTTPStatus
@@ -16,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CORPUS = Path(os.environ.get("CORPUS_DIR", ROOT / "data" / "corpus_v1")).resolve()
 DB = Path(os.environ.get("SEARCH_DB", CORPUS / "search.sqlite")).resolve()
 STOP_WORDS = {"anh", "hinh", "cho", "toi", "nhung", "cac", "cua", "ve", "mot", "o", "tai", "la"}
+RAW_STOP_WORDS = {"con", "trong"}
 
 
 def fold(value: str) -> str:
@@ -25,8 +27,25 @@ def fold(value: str) -> str:
 
 
 def tokens(query: str) -> list[str]:
-    return [word for word in re.findall(r"[a-z0-9]+", fold(query))
-            if len(word) > 1 and word not in STOP_WORDS][:16]
+    original_words = re.findall(r"[^\W_]+", query.lower(), re.UNICODE)
+    return [fold(word) for word in original_words
+            if len(fold(word)) > 1 and fold(word) not in STOP_WORDS
+            and word not in RAW_STOP_WORDS][:16]
+
+
+def accented_words(query: str) -> set[str]:
+    """Retain user-supplied tones when checking an accent-folded FTS hit."""
+    words = {word.lower() for word in re.findall(r"[^\W_]+", query, re.UNICODE)}
+    return {word for word in words if fold(word) != word and fold(word) not in STOP_WORDS}
+
+
+def matches_accents(row: sqlite3.Row, required: set[str]) -> bool:
+    if not required:
+        return True
+    original = " ".join(str(row[column] or "") for column in
+                        ("entity_names", "caption", "region", "page_title"))
+    present = {word.lower() for word in re.findall(r"[^\W_]+", original, re.UNICODE)}
+    return required.issubset(present)
 
 
 def connection() -> sqlite3.Connection:
@@ -35,10 +54,12 @@ def connection() -> sqlite3.Connection:
     return con
 
 
-def find_images(con: sqlite3.Connection, query: str, limit: int, region: str | None = None) -> list[dict]:
+def find_images(con: sqlite3.Connection, query: str, limit: int, region: str | None = None,
+                deadline: float | None = None) -> list[dict]:
     terms = tokens(query)
     if not terms:
         return []
+    required_accents = accented_words(query)
     region_filter = "AND images.region = ?" if region else ""
     statement = f"""
         SELECT images.image_path, images.entity_names, images.caption,
@@ -61,16 +82,33 @@ def find_images(con: sqlite3.Connection, query: str, limit: int, region: str | N
                 break
         if len(phrases) >= 8:
             break
-    if len(terms) > 1:
-        phrases.append([terms[-1]])
+    # A single-word fallback for a longer query often returns a different
+    # subject ("con vật sống trong rừng" -> any caption mentioning a forest).
+    # Return no result when no two-term group is grounded instead.
     rows = []
     seen = set()
     for phrase in phrases:
+        if deadline is not None and time.perf_counter() >= deadline:
+            break
         expression = " AND ".join(f'"{term}"' for term in phrase)
         if expression in seen:
             continue
         seen.add(expression)
-        rows = con.execute(statement, (expression, region, limit) if region else (expression, limit)).fetchall()
+        phrase_accents = {word for word in required_accents if fold(word) in phrase}
+        fetch_limit = min(max(limit * 20, 100), 1000) if phrase_accents else limit
+        if deadline is not None:
+            con.set_progress_handler(lambda: int(time.perf_counter() >= deadline), 1000)
+        try:
+            candidates = con.execute(statement, (expression, region, fetch_limit)
+                                     if region else (expression, fetch_limit)).fetchall()
+        except sqlite3.OperationalError as exc:
+            if deadline is None or "interrupted" not in str(exc).lower():
+                raise
+            break
+        finally:
+            if deadline is not None:
+                con.set_progress_handler(None, 0)
+        rows = [row for row in candidates if matches_accents(row, phrase_accents)][:limit]
         if rows:
             break
     return [{
@@ -86,6 +124,7 @@ def find_images(con: sqlite3.Connection, query: str, limit: int, region: str | N
 def search(con: sqlite3.Connection, query: str, limit: int = 10) -> dict:
     query = query.strip()[:300]
     limit = max(1, min(limit, 50))
+    deadline = time.perf_counter() + 2.5
     if re.search(r"\b(?:con trai|con gái|vợ|chồng|cha ruột|mẹ ruột|bố của|cha của|mẹ của)\b", query, re.I):
         return {"type": "multi_hop", "query": query, "results": [],
                 "reason": "Chưa có dữ liệu quan hệ gia đình để xác minh truy vấn này."}
@@ -108,9 +147,10 @@ def search(con: sqlite3.Connection, query: str, limit: int = 10) -> dict:
                     "reason": "Tên thực thể tham chiếu gắn với nhiều địa bàn; cần chỉ rõ địa bàn.",
                     "candidate_regions": [row["region"] for row in regions]}
         region = regions[0]["region"]
-        results = find_images(con, subject, limit, region=region)
+        results = find_images(con, subject, limit, region=region, deadline=deadline)
         return {"type": "multi_hop", "query": query, "resolved_region": region,
-                "reference_entity": reference, "results": results}
+                "reference_entity": reference, "results": results,
+                "partial": time.perf_counter() >= deadline}
 
     parts = [part.strip() for part in re.split(r"\s+và\s+", query, flags=re.I) if part.strip()]
     if len(parts) > 1:
@@ -118,7 +158,7 @@ def search(con: sqlite3.Connection, query: str, limit: int = 10) -> dict:
         seen = set()
         combined = []
         for part in parts[:4]:
-            hits = find_images(con, part, limit)
+            hits = find_images(con, part, limit, deadline=deadline)
             groups.append({"intent": part, "results": hits})
         for rank in range(limit):
             for group in groups:
@@ -127,8 +167,11 @@ def search(con: sqlite3.Connection, query: str, limit: int = 10) -> dict:
                     hit = hits[rank]
                     seen.add(hit["image_url"])
                     combined.append(hit)
-        return {"type": "multi_intent", "query": query, "intents": groups, "results": combined}
-    return {"type": "single_intent", "query": query, "results": find_images(con, query, limit)}
+        return {"type": "multi_intent", "query": query, "intents": groups,
+                "results": combined, "partial": time.perf_counter() >= deadline}
+    results = find_images(con, query, limit, deadline=deadline)
+    return {"type": "single_intent", "query": query, "results": results,
+            "partial": time.perf_counter() >= deadline}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -165,6 +208,19 @@ class Handler(BaseHTTPRequestHandler):
             if not path.is_file():
                 return self.send_json({"error": "report missing"}, HTTPStatus.NOT_FOUND)
             return self.send_json(json.loads(path.read_text(encoding="utf-8")))
+        if parsed.path == "/api/processing":
+            path = CORPUS / "processing_decisions_report.json"
+            if not path.is_file():
+                return self.send_json({"error": "processing report missing"}, HTTPStatus.NOT_FOUND)
+            report = json.loads(path.read_text(encoding="utf-8"))
+            return self.send_json({
+                "rows": report["rows"],
+                "distinct_valid_processed_sha256": report["distinct_valid_processed_sha256"],
+                "action_counts": report["action_counts"],
+                "elapsed_seconds": report["elapsed_seconds"],
+                "manifest_rows_per_second": report["manifest_rows_per_second"],
+                "scope": "local technical checks on a human-approved corpus",
+            })
         if parsed.path.startswith("/images/"):
             relative = unquote(parsed.path[len("/images/"):])
             image_root = (CORPUS / "images").resolve()

@@ -42,6 +42,14 @@ The processing decisions are deliberately narrow. HTTP/decode failure, corrupted
 
 `data/` contains company inputs, manifests, images and reports and is excluded from Git. `build_corpus.py` appends one result per attempted URL and emits `progress.json` every batch. It pauses on low disk or widespread DNS errors. `import_local_corpus.py` hard-links verified WebP files from an existing local corpus and writes `assembled_manifest.jsonl`; it does not alter the source project. `verify_assembled_corpus.py` checks every selected row, decodes each chosen WebP, checks its processed checksum, and reports the number of distinct processed hashes. Only that audited count can support the 80,000-image claim.
 
+`build_processing_decisions.py` turns the assembled manifest into a reproducible
+technical action file. Unavailable URLs go to retry/source review; missing or
+invalid stored files go to quarantine; identical processed bytes reuse the
+first asset; dHash candidates go to visual duplicate review; other valid files
+pass the technical stage. None of these actions assert that a new crawl image
+matches its entity or passes safety policy. Human keep labels remain distinct
+from automatic actions in both the row output and aggregate report.
+
 ## Performance reporting
 
 Measure download throughput, decode/hash throughput, image embedding throughput, and API latency separately. A network failure or rate limit changes download throughput but not local hash throughput. Report hardware, worker count, sample size, wall time, p50/p95 and error breakdown. Extrapolations to 10–100 million images must state assumptions about source availability, parallelism, storage and compute cost; they are not measured throughput at that scale.
@@ -53,8 +61,16 @@ Retrieval latency is measured at the API boundary on the full real-image index a
 The demo uses SQLite FTS5 over normalized entity names, captions, page titles,
 region, and description. A single-intent query first requires all meaningful
 terms to occur in an indexed row. If there is no hit, it backs off to short
-contiguous term groups, then to the final term. This avoids scoring most of the
-corpus for broad `OR` queries while still returning a documented partial match.
+contiguous term groups; it does not fall back to a single word from a longer
+query. Candidate rows must also contain the original accented words used in
+the matched group in their display metadata, avoiding obvious `hổ`/`hồ`
+collisions. These rules reduce weak lexical matches but do not establish
+semantic relevance. They avoid scoring most of the corpus for broad `OR`
+queries while still returning a documented partial match.
+The API shares a 2.5-second SQLite work budget across the parts of a query;
+if it expires, it stops scanning and marks the response partial. This protects
+the response budget from a broad FTS case but cannot prevent host scheduling,
+container startup or image transfer delays outside the SQLite work budget.
 The returned `bm25` score is a lexical rank, not an image embedding score.
 
 A multi-intent query is split on Vietnamese `và`; each part is searched

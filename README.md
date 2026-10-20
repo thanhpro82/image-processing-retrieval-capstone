@@ -43,6 +43,36 @@ is known. This benchmark excludes download, semantic verification, safety
 screening, candidate-pair search, and human review; it must not be described as
 end-to-end throughput for Pain Point A.
 
+To run the implemented conservative decision gate over every assembled row,
+including retries, file quarantine, exact-byte asset reuse and near-duplicate
+review routing, run:
+
+    python scripts/build_processing_decisions.py --workers 4
+
+The local `data/corpus_v1/processing_decisions.jsonl` records one action per
+manifest row, and `processing_decisions_report.json` records counts and wall
+time. `pass_technical_pending_content` means the file passed technical checks;
+it is **not** automatic approval of entity relevance, watermark or safety.
+These corpus images entered with human keep labels. The decision gate cannot
+be scored as an automatic semantic filter on this human-preselected corpus.
+For the 1,000-row pilot, the same gate can be run against existing human labels
+without re-reviewing images:
+
+    python scripts/build_processing_decisions.py --corpus data/pilot --image-root data/pilot/images --manifest data/pilot/manifest.jsonl --near-pairs data/pilot/no_pairs.jsonl --labels-csv data/analysis/processing_pilot_label_audit.csv --output data/analysis/processing_pilot_gate_decisions.jsonl --report data/analysis/processing_pilot_gate_report.json
+
+The absent `no_pairs.jsonl` intentionally disables the separate near-duplicate
+queue for this small pilot; the run measures the technical gate only. Its
+human-label cross-tab exposes rejected images that still pass technical checks.
+
+`python scripts/project_processing_scale.py` writes a local 1M/10M/100M
+resource projection from the measured 10,000-image CPU probe and 1,000-URL
+download pilot. Supply `--machine-hour-usd` and
+`--storage-gb-month-usd` only when actual infrastructure rates are known.
+Missing rates remain `null`; the projection excludes model, network and human
+review cost and is not a measured end-to-end scale result.
+The proposed sharded design and its evidence boundary are in
+[`docs/scale_design.md`](docs/scale_design.md).
+
 If local port 8080 is already in use, set a different host port before starting Compose (PowerShell: `$env:DEMO_PORT=8081`).
 
 Open `http://localhost:8080`. Docker mounts `data/corpus_v1` read-only and copies the SQLite index into a named Linux volume at startup so queries do not scan the Windows bind mount. The container does not put any company images in the public image or Git repository. `/healthz`, `/api/search?q=...`, and `/api/summary` are available for automated checks. The current search method is a SQLite FTS baseline over entity names, captions and region. Its multi-hop support is limited to explicitly recorded entity→region links; unsupported relations return no grounded answer. API timings are available in the local report; independently judged relevance is still needed.
