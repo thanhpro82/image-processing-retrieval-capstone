@@ -51,7 +51,7 @@ def classify_reason(note: str, label: str) -> tuple[str, str, bool]:
         return found[0], "heuristic_explicit_note", False
     if len(found) > 1:
         return "multiple_or_mixed_reasons", "heuristic_mixed_note", True
-    return "unclear_note_needs_review", "unclear", True
+    return "unclear_note_unclassified", "unclassified_note", True
 
 
 def main() -> None:
@@ -68,28 +68,35 @@ def main() -> None:
     # The canonical source key includes batch. Stream the reviewed role once and retain
     # only keys present in this 1,000-row pilot.
     wanted = {(int(r["batch"]), str(r.get("entity_id")), r.get("source_url")) for r in records}
-    labels: dict[tuple[int, str, str], tuple[str, str, str]] = {}
+    labels: dict[tuple[int, str, str], tuple[str, str, str, str, str, int]] = {}
     with sqlite3.connect(args.database) as con:
-        for batch, entity_id, url, decision, reviewer, note in con.execute(
-            "SELECT batch, entity_id, url, decision, reviewer, note FROM canonical_role "
+        for batch, entity_id, url, decision, reviewer, note, source_kind, filename, excel_row in con.execute(
+            "SELECT batch, entity_id, url, decision, reviewer, note, source_kind, filename, excel_row FROM canonical_role "
             "WHERE sheet_role='reviewed' AND decision IN ('', 'x')"
         ):
             key = (int(batch), str(entity_id), url)
             if key in wanted:
-                labels[key] = ("keep" if decision == "" else "reject", reviewer or "", note or "")
+                labels[key] = (
+                    "keep" if decision == "" else "reject", reviewer or "", note or "",
+                    source_kind or "", filename or "", int(excel_row or 0),
+                )
 
     args.output_csv.parent.mkdir(parents=True, exist_ok=True)
     reason_counts: Counter[str] = Counter()
     label_counts: Counter[str] = Counter()
     status_counts: Counter[str] = Counter()
     by_batch: dict[str, Counter[str]] = {}
+    label_source_counts: Counter[str] = Counter()
     missing_labels = 0
     review_queue = 0
+    unclassified_reason_notes = 0
     fields = [
         "batch", "stt", "entity_id", "entity_name", "entity_description", "source_url",
         "source_page", "source_title", "image_path", "image_file",
-        "image_status", "human_label", "reviewer", "original_note",
-        "normalized_reason", "reason_status", "needs_reason_review",
+        "image_status", "human_label", "reviewer", "label_source_kind",
+        "label_source_file", "label_source_excel_row", "original_note",
+        "normalized_reason", "reason_status", "reason_classification_unresolved",
+        "needs_reason_review",
         "eligible_for_model_evaluation",
     ]
     with args.output_csv.open("w", encoding="utf-8-sig", newline="") as stream:
@@ -99,11 +106,17 @@ def main() -> None:
             key = (int(record["batch"]), str(record.get("entity_id")), record.get("source_url"))
             label_info = labels.get(key)
             if label_info:
-                label, reviewer, note = label_info
-                reason, reason_status, needs_review = classify_reason(note, label)
+                label, reviewer, note, source_kind, source_file, source_row = label_info
+                reason, reason_status, unresolved_reason = classify_reason(note, label)
+                # The keep/reject decision is already human verified in the
+                # canonical final/recheck workbook. Unclear prose affects only
+                # reason-specific analysis; it does not trigger another image review.
+                needs_review = False
             else:
                 label, reviewer, note = "unknown", "", ""
+                source_kind, source_file, source_row = "", "", 0
                 reason, reason_status, needs_review = "missing_canonical_label", "unclear", True
+                unresolved_reason = True
                 missing_labels += 1
             status = record.get("status", "unknown")
             eligible = label in {"keep", "reject"} and status == "valid_image"
@@ -115,13 +128,19 @@ def main() -> None:
                 "source_page": record.get("source_page", ""), "source_title": record.get("source_title", ""),
                 "image_file": str((args.pilot / "images" / record["image_path"]).resolve()) if record.get("image_path") else "",
                 "image_status": status, "human_label": label, "reviewer": reviewer,
+                "label_source_kind": source_kind, "label_source_file": source_file,
+                "label_source_excel_row": source_row,
                 "original_note": note, "normalized_reason": reason,
-                "reason_status": reason_status, "needs_reason_review": str(needs_review).lower(),
+                "reason_status": reason_status,
+                "reason_classification_unresolved": str(unresolved_reason).lower(),
+                "needs_reason_review": str(needs_review).lower(),
                 "eligible_for_model_evaluation": str(eligible).lower(),
             })
             reason_counts[reason] += 1
             label_counts[label] += 1
             status_counts[status] += 1
+            label_source_counts[source_kind or "missing"] += 1
+            unclassified_reason_notes += int(unresolved_reason)
             batch_counts = by_batch.setdefault(str(record.get("batch")), Counter())
             batch_counts[label] += 1
             if needs_review:
@@ -137,14 +156,19 @@ def main() -> None:
 
     report = {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
-        "source": "pilot manifest joined to canonical_role by batch + entity_id + URL; reviewed sheet only",
+        "source": "pilot manifest joined to canonical_role by batch + entity_id + URL; human-reviewed final sheet with latest recheck overrides",
         "rows": len(records), "labels": dict(label_counts), "image_status": dict(status_counts),
-        "normalized_reasons": dict(reason_counts), "rows_needing_reason_review": review_queue,
+        "normalized_reasons": dict(reason_counts),
+        "label_source_kind": dict(label_source_counts),
+        "rows_needing_human_label_resolution": review_queue,
+        "rows_needing_reason_review": 0,
+        "rows_with_unclassified_reason_note": unclassified_reason_notes,
         "review_queue_csv": str(args.review_queue),
         "missing_canonical_labels": missing_labels,
         "eligible_labeled_valid_images": sum(1 for r in records if r.get("status") == "valid_image" and (int(r["batch"]), str(r.get("entity_id")), r.get("source_url")) in labels),
         "by_batch": {batch: dict(counts) for batch, counts in sorted(by_batch.items(), key=lambda x: int(x[0]))},
-        "reason_mapping_note": "Note categories are keyword heuristics for audit triage, not ground-truth reason labels. Review rows marked needs_reason_review before training or reporting per-reason metrics.",
+        "label_policy": "Binary keep/reject labels are reused directly from human-reviewed final workbook rows; the latest matching recheck row overrides final. No image is re-reviewed for this pilot.",
+        "reason_mapping_note": "Reason categories are keyword-derived from human verify notes. Unclear or missing notes remain unclassified and are excluded from reason-specific metrics; they do not block binary keep/reject evaluation.",
     }
     args.output_report.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
