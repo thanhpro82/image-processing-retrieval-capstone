@@ -37,6 +37,10 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(found["type"], "single_intent")
         self.assertEqual(found["results"][0]["image_url"], "/images/a.webp")
 
+    def test_extra_unmatched_word_backs_off_to_a_matching_phrase(self):
+        found = search(self.con, "bãi biển đẹp Nha Trang")
+        self.assertEqual(found["results"][0]["image_url"], "/images/a.webp")
+
     def test_multi_intent_has_two_groups(self):
         found = search(self.con, "lễ hội và ẩm thực", limit=2)
         self.assertEqual(found["type"], "multi_intent")
@@ -52,6 +56,12 @@ class SearchTests(unittest.TestCase):
 
     def test_unknown_relation_does_not_invent_answer(self):
         found = search(self.con, "lễ hội ở cùng tỉnh với nơi không tồn tại")
+        self.assertEqual(found["results"], [])
+        self.assertIn("reason", found)
+
+    def test_family_relation_without_evidence_is_explicitly_unsupported(self):
+        found = search(self.con, "ảnh con trai chủ tịch Phạm Nhật Vượng")
+        self.assertEqual(found["type"], "multi_hop")
         self.assertEqual(found["results"], [])
         self.assertIn("reason", found)
 

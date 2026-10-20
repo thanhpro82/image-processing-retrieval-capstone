@@ -39,15 +39,40 @@ def find_images(con: sqlite3.Connection, query: str, limit: int, region: str | N
     terms = tokens(query)
     if not terms:
         return []
-    expression = " OR ".join(f'"{term}"' for term in terms)
     region_filter = "AND images.region = ?" if region else ""
-    rows = con.execute(f"""
+    statement = f"""
         SELECT images.image_path, images.entity_names, images.caption,
                images.region, images.page_title,
                bm25(images_fts, 8.0, 2.0, 1.0, 3.0, 0.5) AS score
         FROM images_fts JOIN images ON images_fts.rowid = images.id
         WHERE images_fts MATCH ? {region_filter} ORDER BY score LIMIT ?
-    """, (expression, region, limit) if region else (expression, limit)).fetchall()
+    """
+    # A broad OR query can score most of the 89k-row corpus, especially when a
+    # place name contains common province words. Try the whole phrase first;
+    # if it is absent, back off to short contiguous phrases before one word.
+    # This bounds the work without silently pretending the full intent matched.
+    phrases = [terms]
+    for width in (3, 2):
+        if len(terms) <= width:
+            continue
+        for start in range(len(terms) - width, -1, -1):
+            phrases.append(terms[start:start + width])
+            if len(phrases) >= 8:
+                break
+        if len(phrases) >= 8:
+            break
+    if len(terms) > 1:
+        phrases.append([terms[-1]])
+    rows = []
+    seen = set()
+    for phrase in phrases:
+        expression = " AND ".join(f'"{term}"' for term in phrase)
+        if expression in seen:
+            continue
+        seen.add(expression)
+        rows = con.execute(statement, (expression, region, limit) if region else (expression, limit)).fetchall()
+        if rows:
+            break
     return [{
         "image_url": "/images/" + quote(row["image_path"].replace("\\", "/").removeprefix("images/")),
         "entity_names": row["entity_names"],
@@ -61,6 +86,9 @@ def find_images(con: sqlite3.Connection, query: str, limit: int, region: str | N
 def search(con: sqlite3.Connection, query: str, limit: int = 10) -> dict:
     query = query.strip()[:300]
     limit = max(1, min(limit, 50))
+    if re.search(r"\b(?:con trai|con gái|vợ|chồng|cha ruột|mẹ ruột|bố của|cha của|mẹ của)\b", query, re.I):
+        return {"type": "multi_hop", "query": query, "results": [],
+                "reason": "Chưa có dữ liệu quan hệ gia đình để xác minh truy vấn này."}
     hop = re.search(r"(.+?)\s+ở cùng (?:tỉnh|địa bàn|vùng) với\s+(.+)", query, re.I)
     if hop:
         subject, reference = hop.group(1).strip(), hop.group(2).strip()

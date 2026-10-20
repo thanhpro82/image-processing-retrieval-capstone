@@ -31,6 +31,18 @@ After import, run `python scripts/verify_assembled_corpus.py` and inspect `data/
     python -m unittest discover -s tests
     docker compose up --build
 
+To reproduce the CPU-side processing measurement on a seeded, uniform sample of
+the assembled assets, run:
+
+    python scripts/benchmark_processing.py --sample 10000 --workers 4
+
+The ignored `data/corpus_v1/processing_cpu_benchmark_report.json` records
+checksum, decode and dHash latency, measured throughput, and a same-machine
+projection. Supply `--cpu-usd-per-hour` only when an actual machine-hour price
+is known. This benchmark excludes download, semantic verification, safety
+screening, candidate-pair search, and human review; it must not be described as
+end-to-end throughput for Pain Point A.
+
 If local port 8080 is already in use, set a different host port before starting Compose (PowerShell: `$env:DEMO_PORT=8081`).
 
 Open `http://localhost:8080`. Docker mounts `data/corpus_v1` read-only and copies the SQLite index into a named Linux volume at startup so queries do not scan the Windows bind mount. The container does not put any company images in the public image or Git repository. `/healthz`, `/api/search?q=...`, and `/api/summary` are available for automated checks. The current search method is a SQLite FTS baseline over entity names, captions and region. Its multi-hop support is limited to explicitly recorded entity→region links; unsupported relations return no grounded answer. API timings are available in the local report; independently judged relevance is still needed.
