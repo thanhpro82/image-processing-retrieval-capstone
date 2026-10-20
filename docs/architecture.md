@@ -47,3 +47,30 @@ The processing decisions are deliberately narrow. HTTP/decode failure, corrupted
 Measure download throughput, decode/hash throughput, image embedding throughput, and API latency separately. A network failure or rate limit changes download throughput but not local hash throughput. Report hardware, worker count, sample size, wall time, p50/p95 and error breakdown. Extrapolations to 10–100 million images must state assumptions about source availability, parallelism, storage and compute cost; they are not measured throughput at that scale.
 
 Retrieval latency is measured at the API boundary on the full real-image index after warm-up. Report single intent, multi-intent and multi-hop cases separately, including requests that fail to find a grounded answer. Do not count synthetic repeated vectors as real indexed images.
+
+## Retrieval behavior in the demo
+
+The demo uses SQLite FTS5 over normalized entity names, captions, page titles,
+region, and description. A single-intent query first requires all meaningful
+terms to occur in an indexed row. If there is no hit, it backs off to short
+contiguous term groups, then to the final term. This avoids scoring most of the
+corpus for broad `OR` queries while still returning a documented partial match.
+The returned `bm25` score is a lexical rank, not an image embedding score.
+
+A multi-intent query is split on Vietnamese `và`; each part is searched
+separately and the result groups are interleaved with duplicate image URLs
+removed. The response retains each intent group so the UI and benchmark can
+inspect coverage. This is a lexical baseline, not a learned compositional
+model.
+
+The supported multi-hop form is “subject ở cùng tỉnh/địa bàn/vùng với reference
+entity”. The API resolves the reference through the explicit `entity_region`
+table, rejects ambiguous or absent region links, then searches the subject
+within that region. Family relationships are absent from the source metadata;
+the API returns an unsupported reason and no images for those queries rather
+than inventing a relation. Other arbitrary hops are outside this baseline.
+
+The 3-second benchmark measures HTTP request-to-JSON latency only. It does not
+include thumbnail downloads or establish visual relevance. The deterministic
+metadata-derived proxy cases must be supplemented with independent top-result
+judgments before making a quality claim.
