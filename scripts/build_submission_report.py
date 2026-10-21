@@ -19,7 +19,7 @@ def load(path: Path) -> dict:
 
 
 def validate(audit: dict, gate: dict, cpu: dict, safety: dict, api: dict, scale: dict,
-             safety_corpus: dict | None = None) -> None:
+             safety_corpus: dict | None = None, streaming: dict | None = None) -> None:
     if audit["unique_processed_sha256"] < 80_000 or audit["invalid_count"]:
         raise ValueError("Corpus has not passed the >=80,000 distinct valid-image audit")
     if audit["manifest_rows"] != gate["rows"]:
@@ -42,11 +42,19 @@ def validate(audit: dict, gate: dict, cpu: dict, safety: dict, api: dict, scale:
         raise ValueError("Projection uses a different CPU run")
     if sum(gate["action_counts"].values()) != gate["rows"]:
         raise ValueError("Processing actions do not cover the manifest")
+    if streaming is not None and (
+        streaming.get("rows") != gate["rows"]
+        or streaming.get("distinct_valid_processed_sha256") != gate["distinct_valid_processed_sha256"]
+        or streaming.get("action_counts") != gate["action_counts"]
+        or streaming.get("execution_mode") != "disk_backed_streaming"
+    ):
+        raise ValueError("Streaming gate differs from the validated in-memory gate")
 
 
 def render(audit: dict, gate: dict, cpu: dict, safety: dict, api: dict,
-           scale: dict, commit: str, safety_corpus: dict | None = None) -> str:
-    validate(audit, gate, cpu, safety, api, scale, safety_corpus)
+           scale: dict, commit: str, safety_corpus: dict | None = None,
+           streaming: dict | None = None) -> str:
+    validate(audit, gate, cpu, safety, api, scale, safety_corpus, streaming)
     kinds = (("single_intent", "Một ý định"), ("multi_intent", "Nhiều ý định"),
              ("multi_hop", "Nhiều bước"))
     lines = [
@@ -73,6 +81,10 @@ def render(audit: dict, gate: dict, cpu: dict, safety: dict, api: dict,
         f"{cpu['throughput_assets_per_second']:.2f} ảnh/s | {cpu['workers']} worker, ảnh đã tải |",
         f"| Cổng quyết định kỹ thuật | {gate['rows']:,} dòng | "
         f"{gate['manifest_rows_per_second']:.2f} dòng/s | Kiểm file, tái sử dụng SHA, định tuyến nghi trùng |",
+        *([f"| Cổng kỹ thuật dạng streaming | {streaming['rows']:,} dòng | "
+           f"{streaming['manifest_rows_per_second']:.2f} dòng/s | "
+           f"SQLite lưu trạng thái, batch {streaming['chunk_rows']:,} dòng; cùng kết quả quyết định |"]
+          if streaming else []),
         f"| Model NSFW shadow | {safety['images']:,} ảnh | "
         f"{safety['images_per_second']:.2f} ảnh/s | {safety['device'].upper()}, batch {safety['batch_size']}, không tự loại |",
         *([f"| Model NSFW shadow trên corpus | {safety_corpus['images']:,} ảnh | "
@@ -85,6 +97,9 @@ def render(audit: dict, gate: dict, cpu: dict, safety: dict, api: dict,
         f"{gate['action_counts'].get('review_near_duplicate', 0):,} vào hàng nghi trùng; "
         f"{gate['action_counts'].get('reuse_exact_asset', 0):,} dùng lại asset trùng byte; "
         f"{gate['action_counts'].get('retry_or_review_source', 0):,} cần tải lại/xem nguồn.",
+        *(["Bản streaming cho cùng số quyết định nhưng chậm hơn bản giữ trạng thái "
+           "trong RAM; nó giới hạn kích thước batch Python, còn SQLite vẫn tăng "
+           "theo số asset. Đây chưa phải benchmark 10–100 triệu ảnh."] if streaming else []),
         "",
         f"NSFW shadow tại ngưỡng 0,5 gắn cờ "
         f"{safety['flag_counts_by_mixed_human_label'].get('0.5', {}).get('keep', 0)} "
@@ -153,6 +168,8 @@ def render(audit: dict, gate: dict, cpu: dict, safety: dict, api: dict,
         "- `python scripts/verify_assembled_corpus.py`: audit ảnh thật và SHA.",
         "- `python scripts/benchmark_processing.py --sample 10000 --workers 4`: CPU.",
         "- `python scripts/build_processing_decisions.py --workers 4`: quyết định kỹ thuật.",
+        *(["- `python scripts/build_processing_decisions_streaming.py --workers 4 "
+           "--chunk-rows 1000`: bản trạng thái SQLite."] if streaming else []),
         "- `.venv\\Scripts\\python.exe scripts/pilot_safety_shadow.py --batch-size 16`: NSFW shadow pilot.",
         *(["- `.venv\\Scripts\\python.exe scripts/pilot_safety_shadow.py "
            "--manifest data/corpus_v1/assembled_manifest.jsonl --image-root data/corpus_v1 "
@@ -191,6 +208,8 @@ def main() -> None:
     if args.safety_corpus_report and not corpus_safety_path.is_file():
         raise FileNotFoundError(corpus_safety_path)
     corpus_safety = load(corpus_safety_path) if corpus_safety_path.is_file() else None
+    streaming_path = corpus / "processing_decisions_streaming_report.json"
+    streaming = load(streaming_path) if streaming_path.is_file() else None
     if (not args.safety_corpus_report and corpus_safety is not None
             and (corpus_safety["images_per_second"] != scale["adult_content_shadow_pilot_images_per_second"]
                  or corpus_safety["images"] != scale["adult_content_shadow_pilot_images"])):
@@ -204,6 +223,7 @@ def main() -> None:
         scale,
         commit,
         corpus_safety,
+        streaming,
     )
     notes = args.notes_file or analysis / "benchmark_incidents.md"
     if notes.is_file():

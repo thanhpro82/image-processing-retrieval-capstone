@@ -61,6 +61,20 @@ class SubmissionReportTests(unittest.TestCase):
         self.assertIn("10,000 ảnh", body)
         self.assertIn("3 ảnh được model gắn cờ", body)
 
+    def test_streaming_measurement_requires_matching_decisions(self):
+        values = self.inputs()
+        streaming = {
+            "execution_mode": "disk_backed_streaming", "rows": 80003,
+            "distinct_valid_processed_sha256": 80001,
+            "action_counts": values[1]["action_counts"].copy(),
+            "manifest_rows_per_second": 90.0, "chunk_rows": 1000,
+        }
+        body = render(*values, "abc1234", streaming=streaming)
+        self.assertIn("90.00 dòng/s", body)
+        streaming["action_counts"]["reuse_exact_asset"] = 2
+        with self.assertRaisesRegex(ValueError, "Streaming gate differs"):
+            render(*values, "abc1234", streaming=streaming)
+
 
 if __name__ == "__main__":
     unittest.main()
