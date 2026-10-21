@@ -89,6 +89,22 @@ fixed 10% review queue on entity-disjoint test data. This experiment never
 changes automated accept/reject actions; the note-derived reason labels are
 small and not independently adjudicated.
 
+An optional adult-content model runs in **shadow mode only**. Install the
+pilot requirements, then place the pinned Apache-2.0
+[Marqo NSFW model](https://huggingface.co/Marqo/nsfw-image-detection-384?not-for-all-audiences=true)
+files in ignored `.cache/nsfw_model/` (PowerShell commands):
+
+    mkdir .cache/nsfw_model
+    curl.exe -L -C - -o .cache/nsfw_model/config.json https://huggingface.co/Marqo/nsfw-image-detection-384/resolve/0c26ec22111b83f106d72a55f611ec35962bcb65/config.json
+    curl.exe -L -C - -o .cache/nsfw_model/model.safetensors https://huggingface.co/Marqo/nsfw-image-detection-384/resolve/0c26ec22111b83f106d72a55f611ec35962bcb65/model.safetensors
+    python scripts/pilot_safety_shadow.py --batch-size 16
+
+The script verifies both checksums, runs locally, and writes ignored score and
+timing reports under `data/analysis/`. It does not upload images or alter the
+processing decisions. The pilot has no independently confirmed NSFW-positive
+labels, so its threshold counts and throughput are not accuracy evidence or a
+reason to enable automatic rejection.
+
 `python scripts/project_processing_scale.py` writes a local 1M/10M/100M
 resource projection from the measured 10,000-image CPU probe and 1,000-URL
 download pilot. Supply `--machine-hour-usd` and
