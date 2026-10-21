@@ -30,6 +30,12 @@ inference, so neither is an end-to-end cost claim.
 
 The SQLite baseline indexes one row per distinct chosen image path, with entity names, captions and documented region links. `scripts/benchmark_api.py` waits for at least 80,000 indexed images, warms the API, then makes deterministic single-intent, multi-intent and entity→region multi-hop queries. It records HTTP request-to-JSON latency p50, p95, maximum and count at or above 3 seconds for each class. A concurrent 100-request probe measures requests/s. The same seed and index version allow repeat runs.
 
+The benchmark reports timeouts and connection errors in the relevant request
+count, with their elapsed time included in the latency distribution. A failed
+request counts against the 3-second objective and metadata proxy coverage.
+Do not replace a failed run silently with a successful rerun; document both,
+because host load and port routing affect reproducibility.
+
 Automatically generated test cases use indexed entity names and region links as **metadata proxies**. A proxy hit means a returned row contains the expected name; it does not prove visual relevance. Before final reporting, independently judge a fixed set of returned top-10 images per query type and record the criteria, annotator and disagreements. If family or other multi-hop relations are absent from the data, the API returns an unsupported answer; do not label it a successful grounded retrieval.
 
 The API benchmark excludes browser image download/render time. For user-perceived latency, measure from form submission until thumbnails finish loading as a separate metric. Record Docker image size, build time, startup time and healthcheck readiness independently.

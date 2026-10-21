@@ -41,6 +41,16 @@ def request(base: str, query: str) -> tuple[dict, float]:
     return result, (time.perf_counter() - start) * 1000
 
 
+def timed_request(base: str, query: str) -> tuple[dict | None, float, str | None]:
+    """Keep timeouts in the report instead of silently dropping a slow request."""
+    started = time.perf_counter()
+    try:
+        answer, elapsed_ms = request(base, query)
+        return answer, elapsed_ms, None
+    except (OSError, TimeoutError) as exc:
+        return None, (time.perf_counter() - started) * 1000, type(exc).__name__
+
+
 def build_cases(db: Path, count: int, seed: int) -> list[dict]:
     rng = random.Random(seed)
     with sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True) as con:
@@ -96,7 +106,7 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base-url", default="http://127.0.0.1:8080")
+    parser.add_argument("--base-url", default="http://localhost:8080")
     parser.add_argument("--corpus", type=Path, default=PROJECT / "data" / "corpus_v1")
     parser.add_argument("--per-type", type=int, default=10)
     parser.add_argument("--repeats", type=int, default=3)
@@ -114,18 +124,21 @@ def main() -> None:
     results = []
     for case in cases:
         for repeat in range(args.repeats):
-            answer, elapsed_ms = request(args.base_url, case["query"])
+            answer, elapsed_ms, error = timed_request(args.base_url, case["query"])
             results.append({**case, "repeat": repeat, "latency_ms": round(elapsed_ms, 2),
-                            "proxy_hit": proxy_hit(case, answer),
-                            "returned": len(answer.get("results", []))})
+                            "proxy_hit": proxy_hit(case, answer) if answer else False,
+                            "returned": len(answer.get("results", [])) if answer else 0,
+                            "error": error})
 
     # One simple concurrent load probe using the same deterministic queries.
     load_queries = [cases[i % len(cases)]["query"] for i in range(100)]
     started = time.perf_counter()
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = [pool.submit(request, args.base_url, query) for query in load_queries]
-        load_latencies = [future.result()[1] for future in as_completed(futures)]
+        futures = [pool.submit(timed_request, args.base_url, query) for query in load_queries]
+        load_results = [future.result() for future in as_completed(futures)]
+        load_latencies = [result[1] for result in load_results]
     load_seconds = time.perf_counter() - started
+    load_errors = sum(error is not None for _, _, error in load_results)
     by_type = {}
     for kind in ("single_intent", "multi_intent", "multi_hop"):
         subset = [row for row in results if row["type"] == kind]
@@ -136,6 +149,7 @@ def main() -> None:
             "p95_ms": round(percentile(values, 95), 2),
             "max_ms": round(max(values), 2),
             "over_3000ms": sum(value >= 3000 for value in values),
+            "errors": sum(row["error"] is not None for row in subset),
             "metadata_proxy_hit_rate": round(sum(row["proxy_hit"] for row in subset) / len(subset), 4),
         }
     report = {
@@ -150,8 +164,11 @@ def main() -> None:
         "by_type": by_type,
         "load_probe": {"requests": len(load_queries), "workers": args.workers,
                        "elapsed_seconds": round(load_seconds, 3),
-                       "throughput_requests_per_second": round(len(load_queries) / load_seconds, 2),
-                       "p95_ms": round(percentile(load_latencies, 95), 2)},
+                       "successful_requests": len(load_queries) - load_errors,
+                       "throughput_requests_per_second": round((len(load_queries) - load_errors) / load_seconds, 2),
+                       "p95_ms": round(percentile(load_latencies, 95), 2),
+                       "over_3000ms": sum(value >= 3000 for value in load_latencies),
+                       "errors": load_errors},
         "limitations": [
             "Proxy hits reflect metadata overlap, not independent human relevance judgments.",
             "Only entity→region multi-hop is implemented; family and other relations are unsupported.",

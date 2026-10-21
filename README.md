@@ -122,6 +122,15 @@ Open `http://localhost:8080`. Docker mounts `data/corpus_v1` read-only and copie
 
 With the demo running, `python scripts/benchmark_api.py` generates deterministic metadata-based cases for all three query types and measures API latency plus a small concurrent load probe. Its proxy hit metric does not replace independent human relevance judgments. The local JSON report and cases stay under `data/corpus_v1/`.
 
+To regenerate a concise, aggregate-only performance document for submission,
+run `python scripts/build_submission_report.py`. It checks that the corpus
+audit, processing gate, API index and stage projections describe consistent
+runs before writing ignored `data/analysis/submission_performance_report.md`.
+The document separates measured throughput and latency from 10–100M linear
+projections. It contains no per-image rows or URLs. The API benchmark records
+request timeouts and errors as failures instead of omitting them from latency
+counts; on a machine where port 8080 is mapped differently, pass `--base-url`.
+
 ## Remaining work
 
 - Validate semantic, watermark and safety screening against reason-specific labels; do not treat mixed human `x` labels as one target
