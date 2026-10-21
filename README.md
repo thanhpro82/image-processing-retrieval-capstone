@@ -162,6 +162,12 @@ experiment are documented in
 reason-review sheets plus a separate provenance key from the existing 1,000-row
 pilot. Its note-derived strata are sampling aids, not ground-truth reasons;
 the sheets remain empty until independent judgments are collected.
+Run `python scripts/build_reason_validation_ui.py` to create offline
+`reviewer_1.html` and `reviewer_2.html` beside those CSVs. Each page shows one
+image at a time, saves progress in the local browser, and exports CSV or JSON.
+The HTML contains only blinded case metadata and local image paths, never the
+original labels or notes. Keep the two reviewer outputs separate for agreement
+and adjudication; do not count them as labels until they are filled in.
 
 - Validate semantic, watermark and safety screening against reason-specific labels; do not treat mixed human `x` labels as one target
 - Add independent human relevance judgments for retrieval cases and report image-render latency separately
