@@ -105,12 +105,14 @@ processing decisions. The pilot has no independently confirmed NSFW-positive
 labels, so its threshold counts and throughput are not accuracy evidence or a
 reason to enable automatic rejection.
 
-`python scripts/project_processing_scale.py` writes a local 1M/10M/100M
-resource projection from the measured 10,000-image CPU probe and 1,000-URL
-download pilot. Supply `--machine-hour-usd` and
+`python scripts/project_processing_scale.py --safety-report data/analysis/safety_shadow_report.json`
+writes a local 1M/10M/100M resource projection from the measured 10,000-image
+CPU probe, 1,000-URL download pilot and optional adult-content shadow stage.
+Supply `--machine-hour-usd`, `--gpu-hour-usd` and
 `--storage-gb-month-usd` only when actual infrastructure rates are known.
-Missing rates remain `null`; the projection excludes model, network and human
-review cost and is not a measured end-to-end scale result.
+Missing rates remain `null`; the projection excludes other models, network and
+human review cost and is not a measured end-to-end scale result. The shadow
+model has no validated safety accuracy on this corpus.
 The proposed sharded design and its evidence boundary are in
 [`docs/scale_design.md`](docs/scale_design.md).
 

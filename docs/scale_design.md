@@ -48,10 +48,17 @@ CPU machine-hours as `N / measured_cpu_images_per_second / 3600`, processed
 storage bytes as `N × measured_processed_bytes_per_image`, and expected source
 transfer as `N × pilot_source_bytes_per_valid_image`. These are linear
 projections from **different samples**. They omit index overhead, retries,
-model inference, human review and remote host throttling. The URL pilot's
+unmeasured model inference, human review and remote host throttling. The URL pilot's
 observed rate is a network observation on one machine, not a capacity
 guarantee. Cost in USD requires actual machine-hour, storage, network and model
 rates; the generator leaves unknown rates blank rather than inventing a total.
+
+With `--safety-report`, the generator also projects GPU hours for the *one*
+adult-content model measured in shadow mode as
+`N / measured_shadow_images_per_second / 3600`. This stage is still not a
+validated safety filter: the pilot has no independently confirmed NSFW-positive
+labels. The projection excludes watermark, entity and other safety models,
+and no sum of stage times is asserted as end-to-end throughput.
 
 The minimum evaluation before enabling an automated content reject is:
 
