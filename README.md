@@ -129,7 +129,8 @@ runs before writing ignored `data/analysis/submission_performance_report.md`.
 The document separates measured throughput and latency from 10–100M linear
 projections. It contains no per-image rows or URLs. The API benchmark records
 request timeouts and errors as failures instead of omitting them from latency
-counts; on a machine where port 8080 is mapped differently, pass `--base-url`.
+counts, and stores per-request observations locally; on a machine where port
+8080 is mapped differently, pass `--base-url`.
 
 ## Remaining work
 

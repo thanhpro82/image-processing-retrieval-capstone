@@ -84,16 +84,18 @@ def render(audit: dict, gate: dict, cpu: dict, safety: dict, api: dict,
         "",
         "## B — truy xuất trên toàn index",
         "",
-        "HTTP GET đến JSON sau warm-up; không gồm tải và render thumbnail.",
+        f"HTTP GET đến JSON sau warm-up tại `{api.get('base_url', 'địa chỉ không ghi')}`; "
+        "không gồm tải và render thumbnail.",
         "",
-        "| Loại query | Số request | p50 | p95 | Lớn nhất | ≥3 giây | Lỗi |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "| Loại query | Số request | p50 | p95 | Lớn nhất | ≥3 giây | Lỗi | Một phần |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for kind, label in kinds:
         item = api["by_type"][kind]
         lines.append(f"| {label} | {item['requests']} | {item['p50_ms']:.2f} ms | "
                      f"{item['p95_ms']:.2f} ms | {item['max_ms']:.2f} ms | "
-                     f"{item['over_3000ms']} | {item.get('errors', 'chưa ghi')} |")
+                     f"{item['over_3000ms']} | {item.get('errors', 'chưa ghi')} | "
+                     f"{item.get('partial_responses', 'chưa ghi')} |")
     load_probe = api["load_probe"]
     lines += [
         "",
@@ -101,7 +103,8 @@ def render(audit: dict, gate: dict, cpu: dict, safety: dict, api: dict,
         f"{load_probe['throughput_requests_per_second']:.2f} request/s, "
         f"p95 {load_probe['p95_ms']:.2f} ms, "
         f"{load_probe.get('over_3000ms', 'chưa ghi')} request ≥3 giây, "
-        f"{load_probe.get('errors', 'chưa ghi')} lỗi. "
+        f"{load_probe.get('errors', 'chưa ghi')} lỗi, "
+        f"{load_probe.get('partial_responses', 'chưa ghi')} kết quả một phần. "
         "Ca thử sinh từ metadata nên tỷ lệ khớp metadata **không phải** "
         "precision/recall theo nội dung ảnh. Multi-hop chỉ hỗ trợ quan hệ "
         "entity→region đã ghi trong dữ liệu.",

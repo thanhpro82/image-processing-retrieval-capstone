@@ -35,6 +35,10 @@ count, with their elapsed time included in the latency distribution. A failed
 request counts against the 3-second objective and metadata proxy coverage.
 Do not replace a failed run silently with a successful rerun; document both,
 because host load and port routing affect reproducibility.
+It also counts responses marked `partial` by the API and saves per-request
+observations in ignored `data/corpus_v1/api_benchmark_observations.jsonl`, so
+slow cases can be inspected without hiding them in p95. The preflight health
+check reports a clear port-routing error if another local service answers.
 
 Automatically generated test cases use indexed entity names and region links as **metadata proxies**. A proxy hit means a returned row contains the expected name; it does not prove visual relevance. Before final reporting, independently judge a fixed set of returned top-10 images per query type and record the criteria, annotator and disagreements. If family or other multi-hop relations are absent from the data, the API returns an unsupported answer; do not label it a successful grounded retrieval.
 

@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
+from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -114,8 +115,14 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=20261018)
     args = parser.parse_args()
     corpus = args.corpus.resolve()
-    with urlopen(args.base_url + "/healthz", timeout=10) as response:
-        health = json.load(response)
+    try:
+        with urlopen(args.base_url + "/healthz", timeout=10) as response:
+            health = json.load(response)
+    except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+        raise SystemExit(
+            f"Demo health check failed at {args.base_url}/healthz ({exc}). "
+            "Check the Docker host port; pass --base-url if another service owns it."
+        ) from exc
     if health["indexed_images"] < 80000:
         raise ValueError("Benchmark requires at least 80,000 indexed real images")
     cases = build_cases(corpus / "search.sqlite", args.per_type, args.seed)
@@ -128,17 +135,25 @@ def main() -> None:
             results.append({**case, "repeat": repeat, "latency_ms": round(elapsed_ms, 2),
                             "proxy_hit": proxy_hit(case, answer) if answer else False,
                             "returned": len(answer.get("results", [])) if answer else 0,
+                            "partial": answer.get("partial", False) if answer else False,
                             "error": error})
 
     # One simple concurrent load probe using the same deterministic queries.
     load_queries = [cases[i % len(cases)]["query"] for i in range(100)]
     started = time.perf_counter()
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = [pool.submit(timed_request, args.base_url, query) for query in load_queries]
-        load_results = [future.result() for future in as_completed(futures)]
-        load_latencies = [result[1] for result in load_results]
+        futures = {pool.submit(timed_request, args.base_url, query): i
+                   for i, query in enumerate(load_queries)}
+        load_observations = []
+        for future in as_completed(futures):
+            answer, elapsed_ms, error = future.result()
+            load_observations.append({"case_index": futures[future] % len(cases),
+                                      "latency_ms": round(elapsed_ms, 2),
+                                      "partial": answer.get("partial", False) if answer else False,
+                                      "error": error})
+        load_latencies = [row["latency_ms"] for row in load_observations]
     load_seconds = time.perf_counter() - started
-    load_errors = sum(error is not None for _, _, error in load_results)
+    load_errors = sum(row["error"] is not None for row in load_observations)
     by_type = {}
     for kind in ("single_intent", "multi_intent", "multi_hop"):
         subset = [row for row in results if row["type"] == kind]
@@ -150,10 +165,12 @@ def main() -> None:
             "max_ms": round(max(values), 2),
             "over_3000ms": sum(value >= 3000 for value in values),
             "errors": sum(row["error"] is not None for row in subset),
+            "partial_responses": sum(row["partial"] for row in subset),
             "metadata_proxy_hit_rate": round(sum(row["proxy_hit"] for row in subset) / len(subset), 4),
         }
     report = {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "base_url": args.base_url,
         "indexed_images": health["indexed_images"],
         "seed": args.seed,
         "case_method": "Deterministic sample of indexed entity names and entity-region links; generated queries are metadata-based proxies",
@@ -168,6 +185,7 @@ def main() -> None:
                        "throughput_requests_per_second": round((len(load_queries) - load_errors) / load_seconds, 2),
                        "p95_ms": round(percentile(load_latencies, 95), 2),
                        "over_3000ms": sum(value >= 3000 for value in load_latencies),
+                       "partial_responses": sum(row["partial"] for row in load_observations),
                        "errors": load_errors},
         "limitations": [
             "Proxy hits reflect metadata overlap, not independent human relevance judgments.",
@@ -179,6 +197,10 @@ def main() -> None:
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (corpus / "api_benchmark_cases.jsonl").write_text(
         "".join(json.dumps(case, ensure_ascii=False) + "\n" for case in cases), encoding="utf-8")
+    (corpus / "api_benchmark_observations.jsonl").write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in results)
+        + "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in load_observations),
+        encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False), flush=True)
 
 
