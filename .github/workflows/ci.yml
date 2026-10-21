@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install data-free processing test dependencies
-        run: python -m pip install Pillow==12.3.0 numpy==2.2.0
+        run: python -m pip install Pillow==12.3.0 -r requirements-duplicate.txt
       - name: Compile Python sources
         run: python -m compileall -q app scripts
       - name: Test query handling

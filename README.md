@@ -34,6 +34,13 @@ URL groups. The report remains under ignored `data/analysis/`. This script
 does not merge or remove images; a small single-reviewer sample cannot
 establish a production false-merge rate.
 
+For a cheaper pixel-based follow-up on the same labeled pairs, run
+`python scripts/evaluate_duplicate_pixels.py` after installing
+`requirements-duplicate.txt`. Its measured NCC threshold caught some true
+duplicates but also flagged one different photo on the held-out set, so it
+remains a review-priority signal only. See
+[`docs/duplicate_pixel_experiment.md`](docs/duplicate_pixel_experiment.md).
+
 After import, run `python scripts/verify_assembled_corpus.py` and inspect `data/corpus_v1/assembled_verification_report.json`. The report must confirm at least 80,000 distinct processed hashes and no invalid files before building the demo index:
 
     python scripts/build_search_db.py --source PATH_TO_ITS_DATA
