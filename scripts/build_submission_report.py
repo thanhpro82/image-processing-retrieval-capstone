@@ -18,7 +18,8 @@ def load(path: Path) -> dict:
         return json.load(source)
 
 
-def validate(audit: dict, gate: dict, cpu: dict, safety: dict, api: dict, scale: dict) -> None:
+def validate(audit: dict, gate: dict, cpu: dict, safety: dict, api: dict, scale: dict,
+             safety_corpus: dict | None = None) -> None:
     if audit["unique_processed_sha256"] < 80_000 or audit["invalid_count"]:
         raise ValueError("Corpus has not passed the >=80,000 distinct valid-image audit")
     if audit["manifest_rows"] != gate["rows"]:
@@ -29,8 +30,14 @@ def validate(audit: dict, gate: dict, cpu: dict, safety: dict, api: dict, scale:
         raise ValueError("Indexed image count differs from audited path count")
     if safety["policy"] != "shadow_only_no_automatic_rejection":
         raise ValueError("Safety model is no longer in the documented shadow policy")
-    if scale["adult_content_shadow_pilot_images_per_second"] != safety["images_per_second"]:
+    projected_safety = safety_corpus or safety
+    if scale["adult_content_shadow_pilot_images_per_second"] != projected_safety["images_per_second"]:
         raise ValueError("Projection uses a different safety run")
+    if safety_corpus is not None:
+        if safety_corpus["policy"] != "shadow_only_no_automatic_rejection":
+            raise ValueError("Corpus safety probe is not shadow-only")
+        if safety_corpus["images"] != scale["adult_content_shadow_pilot_images"]:
+            raise ValueError("Projection uses a different safety sample size")
     if scale["cpu_sample_throughput_assets_per_second"] != cpu["throughput_assets_per_second"]:
         raise ValueError("Projection uses a different CPU run")
     if sum(gate["action_counts"].values()) != gate["rows"]:
@@ -38,8 +45,8 @@ def validate(audit: dict, gate: dict, cpu: dict, safety: dict, api: dict, scale:
 
 
 def render(audit: dict, gate: dict, cpu: dict, safety: dict, api: dict,
-           scale: dict, commit: str) -> str:
-    validate(audit, gate, cpu, safety, api, scale)
+           scale: dict, commit: str, safety_corpus: dict | None = None) -> str:
+    validate(audit, gate, cpu, safety, api, scale, safety_corpus)
     kinds = (("single_intent", "Một ý định"), ("multi_intent", "Nhiều ý định"),
              ("multi_hop", "Nhiều bước"))
     lines = [
@@ -68,6 +75,10 @@ def render(audit: dict, gate: dict, cpu: dict, safety: dict, api: dict,
         f"{gate['manifest_rows_per_second']:.2f} dòng/s | Kiểm file, tái sử dụng SHA, định tuyến nghi trùng |",
         f"| Model NSFW shadow | {safety['images']:,} ảnh | "
         f"{safety['images_per_second']:.2f} ảnh/s | {safety['device'].upper()}, batch {safety['batch_size']}, không tự loại |",
+        *([f"| Model NSFW shadow trên corpus | {safety_corpus['images']:,} ảnh | "
+           f"{safety_corpus['images_per_second']:.2f} ảnh/s | "
+           f"{safety_corpus['device'].upper()}, mẫu ngẫu nhiên ảnh khác đường dẫn, không tự loại |"]
+          if safety_corpus else []),
         "",
         f"Cổng kỹ thuật: {gate['action_counts'].get('pass_technical_pending_content', 0):,} "
         "qua kiểm tra file nhưng **chưa được máy kiểm nội dung**; "
@@ -81,6 +92,16 @@ def render(audit: dict, gate: dict, cpu: dict, safety: dict, api: dict,
         "ảnh pilot hợp lệ. Pilot không có nhãn NSFW dương được xác nhận độc lập, "
         "nên **không tính được precision/recall NSFW và không bật auto-reject**. "
         "Nhãn Giữ/Bỏ tổng hợp không phải nhãn của từng lý do.",
+        "",
+        *([f"Mẫu corpus lớn hơn có "
+           f"{sum(safety_corpus['flag_counts_by_mixed_human_label'].get('0.5', {}).values())} "
+           f"ảnh được model gắn cờ ở ngưỡng 0,5 trên {safety_corpus['images']:,} ảnh; "
+           f"p50/p95/p99 điểm số là "
+           f"{safety_corpus['score_quantiles_by_mixed_human_label']['unknown']['p50']:.4f}/"
+           f"{safety_corpus['score_quantiles_by_mixed_human_label']['unknown']['p95']:.4f}/"
+           f"{safety_corpus['score_quantiles_by_mixed_human_label']['unknown']['p99']:.4f}. "
+           "Đây là phân bố điểm số trên tập con người đã giữ, chưa phải false-positive rate "
+           "hay accuracy NSFW."] if safety_corpus else []),
         "",
         "## B — truy xuất trên toàn index",
         "",
@@ -132,10 +153,17 @@ def render(audit: dict, gate: dict, cpu: dict, safety: dict, api: dict,
         "- `python scripts/verify_assembled_corpus.py`: audit ảnh thật và SHA.",
         "- `python scripts/benchmark_processing.py --sample 10000 --workers 4`: CPU.",
         "- `python scripts/build_processing_decisions.py --workers 4`: quyết định kỹ thuật.",
-        "- `python scripts/pilot_safety_shadow.py --batch-size 16`: NSFW shadow.",
+        "- `.venv\\Scripts\\python.exe scripts/pilot_safety_shadow.py --batch-size 16`: NSFW shadow pilot.",
+        *(["- `.venv\\Scripts\\python.exe scripts/pilot_safety_shadow.py "
+           "--manifest data/corpus_v1/assembled_manifest.jsonl --image-root data/corpus_v1 "
+           "--no-labels --sample 10000 --seed 20261021 --batch-size 16 "
+           "--output data/analysis/safety_corpus_10k_scores.jsonl "
+           "--report data/analysis/safety_corpus_10k_report.json`: mẫu corpus 10.000 ảnh."]
+          if safety_corpus else []),
         "- `python scripts/benchmark_api.py`: API trên Docker Compose đang chạy.",
         "- `python scripts/project_processing_scale.py --safety-report "
-        "data/analysis/safety_shadow_report.json`: ngoại suy từng tầng.",
+        + ("data/analysis/safety_corpus_10k_report.json" if safety_corpus else
+           "data/analysis/safety_shadow_report.json") + "`: ngoại suy từng tầng.",
         "",
         "JSON gốc nằm trong `data/corpus_v1/` và `data/analysis/` trên máy được "
         "ủy quyền. Xem `docs/benchmark_method.md` để biết cách lấy mẫu và giới hạn.",
@@ -151,19 +179,31 @@ def main() -> None:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--notes-file", type=Path,
                         help="Optional local Markdown note about failed or interrupted runs")
+    parser.add_argument("--safety-corpus-report", type=Path,
+                        help="Optional larger corpus shadow report used by the scale projection")
     args = parser.parse_args()
     corpus, analysis = args.corpus, args.analysis
     commit = subprocess.check_output(
         ["git", "rev-parse", "--short", "HEAD"], cwd=PROJECT, text=True
     ).strip()
+    scale = load(analysis / "processing_scale_projection.json")
+    corpus_safety_path = args.safety_corpus_report or analysis / "safety_corpus_10k_report.json"
+    if args.safety_corpus_report and not corpus_safety_path.is_file():
+        raise FileNotFoundError(corpus_safety_path)
+    corpus_safety = load(corpus_safety_path) if corpus_safety_path.is_file() else None
+    if (not args.safety_corpus_report and corpus_safety is not None
+            and (corpus_safety["images_per_second"] != scale["adult_content_shadow_pilot_images_per_second"]
+                 or corpus_safety["images"] != scale["adult_content_shadow_pilot_images"])):
+        corpus_safety = None
     body = render(
         load(corpus / "assembled_verification_report.json"),
         load(corpus / "processing_decisions_report.json"),
         load(corpus / "processing_cpu_benchmark_report.json"),
         load(analysis / "safety_shadow_report.json"),
         load(corpus / "api_benchmark_report.json"),
-        load(analysis / "processing_scale_projection.json"),
+        scale,
         commit,
+        corpus_safety,
     )
     notes = args.notes_file or analysis / "benchmark_incidents.md"
     if notes.is_file():

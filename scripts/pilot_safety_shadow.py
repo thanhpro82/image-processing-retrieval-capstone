@@ -10,16 +10,14 @@ import csv
 import hashlib
 import json
 import os
+import random
 import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
-import timm
-import torch
 from PIL import Image
-from safetensors.torch import load_file
 
 PROJECT = Path(__file__).resolve().parents[1]
 MODEL_ID = "hf-hub:Marqo/nsfw-image-detection-384"
@@ -36,22 +34,63 @@ def read_jsonl(path: Path):
                 yield json.loads(line)
 
 
+def select_distinct_sample(manifest: Path, sample: int, seed: int) -> tuple[list[dict], int]:
+    """Uniform reservoir sample of decoded asset paths, deduplicated in memory."""
+    if sample < 1:
+        raise ValueError("sample must be positive")
+    rng = random.Random(seed)
+    selected: list[dict] = []
+    seen: set[str] = set()
+    for row in read_jsonl(manifest):
+        path = row.get("image_path")
+        if row.get("status") != "valid_image" or not path or path in seen:
+            continue
+        seen.add(path)
+        ordinal = len(seen)
+        if len(selected) < sample:
+            selected.append(row)
+        else:
+            slot = rng.randrange(ordinal)
+            if slot < sample:
+                selected[slot] = row
+    if len(selected) < sample:
+        raise ValueError(f"Only {len(selected)} distinct valid assets; requested {sample}")
+    selected.sort(key=lambda row: str(row["image_path"]))
+    return selected, len(seen)
+
+
 def percentile_ms(values: list[float], percentile: int) -> float | None:
     return round(float(np.percentile(values, percentile) * 1000), 2) if values else None
 
 
-def run(pilot: Path, labels_csv: Path, model_dir: Path, output: Path, report_path: Path,
-        batch_size: int, limit: int | None = None) -> dict:
+def run(pilot: Path, labels_csv: Path | None, model_dir: Path, output: Path, report_path: Path,
+        batch_size: int, limit: int | None = None, manifest: Path | None = None,
+        image_root: Path | None = None, sample: int | None = None,
+        seed: int = 20261021) -> dict:
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
-    with labels_csv.open(encoding="utf-8-sig", newline="") as source:
-        labels = {(row["batch"], row["entity_id"], row["source_url"]): row["human_label"]
-                  for row in csv.DictReader(source)}
-    rows = list(read_jsonl(pilot / "indexed_manifest.jsonl"))
+    if sample is not None and limit is not None:
+        raise ValueError("Choose --sample or --limit, not both")
+    labels = {}
+    if labels_csv is not None:
+        with labels_csv.open(encoding="utf-8-sig", newline="") as source:
+            labels = {(row["batch"], row["entity_id"], row["source_url"]): row["human_label"]
+                      for row in csv.DictReader(source)}
+    source_manifest = manifest or pilot / "indexed_manifest.jsonl"
+    root = image_root or pilot / "images"
+    if sample is not None:
+        rows, available = select_distinct_sample(source_manifest, sample, seed)
+    else:
+        rows = list(read_jsonl(source_manifest))
+        available = None
     if limit is not None:
         rows = rows[:limit]
     if not rows:
         raise ValueError("No decoded pilot images")
+
+    import timm
+    import torch
+    from safetensors.torch import load_file
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     started_load = time.perf_counter()
@@ -84,7 +123,7 @@ def run(pilot: Path, labels_csv: Path, model_dir: Path, output: Path, report_pat
     load_seconds = time.perf_counter() - started_load
 
     # Warm model kernels without measuring model startup as per-image inference.
-    with Image.open(pilot / "images" / rows[0]["image_path"]) as source:
+    with Image.open(root / str(rows[0]["image_path"]).replace("\\", "/")) as source:
         warm = transform(source.convert("RGB")).unsqueeze(0).to(device)
     with torch.inference_mode():
         model(warm)
@@ -106,7 +145,7 @@ def run(pilot: Path, labels_csv: Path, model_dir: Path, output: Path, report_pat
             batch = rows[start:start + batch_size]
             tensors = []
             for row in batch:
-                with Image.open(pilot / "images" / row["image_path"]) as source:
+                with Image.open(root / str(row["image_path"]).replace("\\", "/")) as source:
                     tensors.append(transform(source.convert("RGB")))
             images = torch.stack(tensors).to(device)
             if device == "cuda":
@@ -139,6 +178,9 @@ def run(pilot: Path, labels_csv: Path, model_dir: Path, output: Path, report_pat
         "weight_sha256": WEIGHT_SHA256, "config_sha256": CONFIG_SHA256,
         "label_names": names,
         "device": device, "batch_size": batch_size, "images": scored,
+        "sampling": {"method": "uniform_without_replacement_distinct_valid_asset_paths",
+                     "seed": seed, "available_distinct_paths": available,
+                     "sampled_assets": sample} if sample is not None else None,
         "model_load_seconds": round(load_seconds, 3),
         "inference_and_preprocessing_seconds": round(inference_seconds, 3),
         "images_per_second": round(scored / inference_seconds, 2),
@@ -158,11 +200,12 @@ def run(pilot: Path, labels_csv: Path, model_dir: Path, output: Path, report_pat
         "score_file": str(output),
         "policy": "shadow_only_no_automatic_rejection",
         "limitations": [
-            "The pilot contains no independently confirmed NSFW-positive labels, so recall and precision cannot be measured.",
-            "Canonical keep/x labels mix many quality reasons and are not an NSFW benchmark.",
+            "The evaluated images have no independently confirmed NSFW-positive labels, so recall and precision cannot be measured.",
+            "Canonical keep/x labels, when supplied, mix many quality reasons and are not an NSFW benchmark.",
             "Threshold counts are workload observations, not accuracy or safety claims.",
             "The model card's reported metrics are on its own dataset, not on this Team 3 corpus.",
             "Reported throughput excludes HTTP download, dHash, source checks, and human review.",
+            "The sampler holds a set of seen paths in RAM and is not a 100M-scale sampling implementation.",
         ],
     }
     temp_report = report_path.with_suffix(report_path.suffix + ".tmp")
@@ -176,14 +219,25 @@ def main() -> None:
     parser.add_argument("--pilot", type=Path, default=PROJECT / "data/pilot")
     parser.add_argument("--labels-csv", type=Path,
                         default=PROJECT / "data/analysis/processing_pilot_label_audit.csv")
+    parser.add_argument("--no-labels", action="store_true",
+                        help="Do not join the pilot's mixed keep/reject labels")
+    parser.add_argument("--manifest", type=Path,
+                        help="Override input manifest, e.g. the full assembled corpus")
+    parser.add_argument("--image-root", type=Path,
+                        help="Root for image_path in --manifest")
+    parser.add_argument("--sample", type=int,
+                        help="Seeded uniform sample of distinct valid asset paths")
+    parser.add_argument("--seed", type=int, default=20261021)
     parser.add_argument("--model-dir", type=Path, default=PROJECT / ".cache/nsfw_model")
     parser.add_argument("--output", type=Path, default=PROJECT / "data/analysis/safety_shadow_scores.jsonl")
     parser.add_argument("--report", type=Path, default=PROJECT / "data/analysis/safety_shadow_report.json")
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--limit", type=int)
     args = parser.parse_args()
-    print(json.dumps(run(args.pilot, args.labels_csv, args.model_dir, args.output,
-                         args.report, args.batch_size, args.limit), ensure_ascii=False, indent=2))
+    print(json.dumps(run(args.pilot, None if args.no_labels else args.labels_csv,
+                         args.model_dir, args.output, args.report, args.batch_size,
+                         args.limit, args.manifest, args.image_root, args.sample,
+                         args.seed), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

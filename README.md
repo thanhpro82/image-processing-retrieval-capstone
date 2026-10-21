@@ -113,6 +113,20 @@ Supply `--machine-hour-usd`, `--gpu-hour-usd` and
 Missing rates remain `null`; the projection excludes other models, network and
 human review cost and is not a measured end-to-end scale result. The shadow
 model has no validated safety accuracy on this corpus.
+
+For a larger **throughput and score-distribution** probe, sample 10,000
+distinct valid asset paths uniformly from the assembled corpus (PowerShell):
+
+    .venv\Scripts\python.exe scripts/pilot_safety_shadow.py --manifest data/corpus_v1/assembled_manifest.jsonl --image-root data/corpus_v1 --no-labels --sample 10000 --seed 20261021 --batch-size 16 --output data/analysis/safety_corpus_10k_scores.jsonl --report data/analysis/safety_corpus_10k_report.json
+
+This is still shadow mode. The sampled assets were selected from images humans
+kept; score frequencies do not measure NSFW recall or justify auto-rejection.
+The model scores and per-image paths stay under ignored `data/analysis/`.
+After a completed 10,000-image run, regenerate the stage-only projection with
+`python scripts/project_processing_scale.py --safety-report data/analysis/safety_corpus_10k_report.json`,
+then run `python scripts/build_submission_report.py` to include that measured
+stage rate in the local submission report. A failed/incomplete run has no final
+report JSON and must not be used for projection.
 The proposed sharded design and its evidence boundary are in
 [`docs/scale_design.md`](docs/scale_design.md).
 

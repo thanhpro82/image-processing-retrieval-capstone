@@ -19,6 +19,16 @@ excluded; the resulting precision is conditional on that restricted cohort.
 The reason categories are provisional because note keywords are not an
 independent adjudication. A failed threshold remains disabled in the pipeline.
 
+The optional larger NSFW shadow probe uses seeded reservoir sampling over
+distinct `valid_image` paths in the assembled manifest. It measures model
+preprocessing plus inference on a broader image-size/content mix and records
+the score distribution. Because this assembled corpus was human preselected
+and has no independently confirmed NSFW-positive cases, the probe is a
+throughput/workload observation, not an accuracy benchmark. The pilot's mixed
+keep/`x` labels must not be projected onto this sample as safety truth.
+The sampler keeps seen paths in RAM to remove duplicates; this 10k probe is
+not evidence that the sampling implementation itself handles 100M rows.
+
 `scripts/build_processing_decisions.py` reports wall time for the technical
 decision gate over every manifest row and cross-tabulates its actions with
 human labels when `--labels-csv` is supplied for the pilot. `scripts/project_processing_scale.py`

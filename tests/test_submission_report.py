@@ -47,6 +47,20 @@ class SubmissionReportTests(unittest.TestCase):
         self.assertIn("chưa có tổng chi phí", body)
         self.assertNotIn("precision/recall NSFW =", body)
 
+    def test_larger_shadow_sample_must_match_projection(self):
+        values = self.inputs()
+        corpus = {**values[3], "images": 10000, "images_per_second": 19.0,
+                  "flag_counts_by_mixed_human_label": {"0.5": {"unknown": 3}},
+                  "score_quantiles_by_mixed_human_label": {
+                      "unknown": {"p50": 0.05, "p95": 0.1, "p99": 0.2}}}
+        with self.assertRaisesRegex(ValueError, "different safety run"):
+            render(*values, "abc1234", corpus)
+        values[5]["adult_content_shadow_pilot_images_per_second"] = 19.0
+        values[5]["adult_content_shadow_pilot_images"] = 10000
+        body = render(*values, "abc1234", corpus)
+        self.assertIn("10,000 ảnh", body)
+        self.assertIn("3 ảnh được model gắn cờ", body)
+
 
 if __name__ == "__main__":
     unittest.main()
