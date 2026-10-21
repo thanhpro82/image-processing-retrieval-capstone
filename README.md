@@ -155,6 +155,14 @@ counts, and stores per-request observations locally; on a machine where port
 
 ## Remaining work
 
+The research-to-implementation decision, measured evidence, and next label
+experiment are documented in
+[`docs/processing_research_decision.md`](docs/processing_research_decision.md).
+`python scripts/prepare_reason_validation.py` creates two blinded, local
+reason-review sheets plus a separate provenance key from the existing 1,000-row
+pilot. Its note-derived strata are sampling aids, not ground-truth reasons;
+the sheets remain empty until independent judgments are collected.
+
 - Validate semantic, watermark and safety screening against reason-specific labels; do not treat mixed human `x` labels as one target
 - Add independent human relevance judgments for retrieval cases and report image-render latency separately
 - Measure the model inference, storage and cloud costs needed for a defensible 10–100M extrapolation
