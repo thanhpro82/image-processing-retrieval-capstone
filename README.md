@@ -25,6 +25,15 @@ For a local visual quality check of full-corpus dHash candidates, run `python sc
 
 If the same authorized Team 3 URL set has already been downloaded locally by the companion retrieval project, install `requirements-import.txt` and run `python scripts/import_local_corpus.py --source PATH_TO_ITS_DATA`. The importer matches canonical URL selections, verifies each WebP, records SHA-256, and creates hard links rather than copying the images. It leaves the source project untouched and records the source transform in `data/corpus_v1/assembled_manifest.jsonl`. It is resumable and does not upload data.
 
+To reproduce the optional geometric duplicate experiment, install
+`requirements-duplicate.txt` and run
+`python scripts/evaluate_duplicate_geometry.py`. It joins the local 100-pair
+human review sample to the dHash candidate manifest, measures SIFT/RANSAC
+matches, and calibrates a candidate threshold without using the held-out
+URL groups. The report remains under ignored `data/analysis/`. This script
+does not merge or remove images; a small single-reviewer sample cannot
+establish a production false-merge rate.
+
 After import, run `python scripts/verify_assembled_corpus.py` and inspect `data/corpus_v1/assembled_verification_report.json`. The report must confirm at least 80,000 distinct processed hashes and no invalid files before building the demo index:
 
     python scripts/build_search_db.py --source PATH_TO_ITS_DATA
@@ -63,6 +72,22 @@ without re-reviewing images:
 The absent `no_pairs.jsonl` intentionally disables the separate near-duplicate
 queue for this small pilot; the run measures the technical gate only. Its
 human-label cross-tab exposes rejected images that still pass technical checks.
+
+For a disk-backed version with a bounded Python row batch, run
+`python scripts/build_processing_decisions_streaming.py --chunk-rows 1000`.
+It stores seen paths, exact hashes and near-candidate keys in a temporary
+SQLite database, then emits the same per-row decisions as the original gate.
+Its output and report use `processing_decisions_streaming.*`. This removes the
+full-manifest Python-memory dependency, but SQLite disk state still grows
+with the number of unique assets and candidate keys. It is a local prototype,
+not a measured 10–100M deployment.
+
+`python scripts/evaluate_source_relevance.py` evaluates a cheap title/entity
+overlap score against the pilot's explicit wrong-entity/location notes. The
+local report shows both a calibration-only low-false-flag threshold and a
+fixed 10% review queue on entity-disjoint test data. This experiment never
+changes automated accept/reject actions; the note-derived reason labels are
+small and not independently adjudicated.
 
 `python scripts/project_processing_scale.py` writes a local 1M/10M/100M
 resource projection from the measured 10,000-image CPU probe and 1,000-URL

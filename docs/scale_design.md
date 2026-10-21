@@ -28,8 +28,12 @@ Retry transient network failures separately from content rejects. Store a
 single asset per processed SHA-256 while preserving all URL→entity links.
 Candidate near-duplicates are compared inside a bounded index/partition and
 never deleted on dHash distance alone. A 100-million-row batch would comprise
-1,000 shards at 100,000 rows each; the current in-memory local scripts would
-need streaming or external state before such a run.
+1,000 shards at 100,000 rows each. The optional
+`build_processing_decisions_streaming.py` prototype now streams manifest rows
+in bounded Python batches and keeps exact-hash, path and candidate-key state
+in a temporary SQLite database. Its local throughput must be measured
+separately; it does not supply durable distributed checkpoints, a partitioned
+perceptual index or a 100M benchmark.
 
 The model gate is designed as three-way: auto-accept, auto-reject or abstain for
 human review. Thresholds must be chosen on validation entities and assessed on

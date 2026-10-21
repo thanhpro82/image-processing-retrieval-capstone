@@ -118,8 +118,10 @@ def run(corpus: Path, manifest: Path, near_pairs: Path | None, output: Path,
     # One decode/hash per stored path. Keep the original manifest row order in
     # the output so that runs are deterministic despite concurrent inspection.
     with ThreadPoolExecutor(max_workers=workers) as pool:
+        # File decode/hash is path-level; expected dimensions are row-level.
+        # A bad first manifest row must not poison later links to the same file.
         inspected = dict(zip(paths, pool.map(
-            lambda item: inspect_file((image_root or corpus) / item[0], item[1]), paths.items()), strict=True))
+            lambda item: inspect_file((image_root or corpus) / item[0], None), paths.items()), strict=True))
     first_by_hash: dict[str, int] = {}
     near_keys = near_duplicate_keys(near_pairs)
     counts: Counter[str] = Counter()

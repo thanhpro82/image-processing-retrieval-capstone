@@ -8,7 +8,16 @@ All metrics are tied to a named manifest version, code commit, machine, worker c
 2. **Exact duplicates:** Hash original HTTP bytes in the downloader. For imported local WebP files, hash the processed bytes in a separate namespace. The assembled audit decodes every chosen file and recomputes its processed checksum. Report both valid URL rows and distinct processed SHA-256 values; the latter determines whether the 80,000-image threshold is met.
 3. **Near duplicates:** Compute versioned dHash on each distinct asset, use five disjoint bands to generate all pairs with Hamming distance at most four, then record candidate pairs and clusters. Inspect contact sheets before calling a pair truly duplicate. A candidate count is an upper bound on potential removals, not a precision or recall claim.
 4. **Human-label accuracy:** Join only reviewed-sheet keep/`x` labels by `(batch, entity_id, URL)`. Keep candidate-sheet `x` out of the negative class. Split by entity before threshold selection. Record confusion matrix, reject recall, good-image false-reject rate and coverage; select thresholds on calibration/validation and evaluate once on unseen test entities. Ambiguous reasons in notes do not become labels for watermark, safety or locality metrics without manual confirmation.
+
 5. **Throughput and cost:** Record end-to-end URLs/s and valid images/s separately from local decode/hash images/s and model inference images/s. Include p50/p95 per stage, peak RAM/VRAM, storage bytes, CPU/GPU hours and network bytes. Extrapolate to 10M and 100M using explicit assumptions about source availability, parallel workers and storage prices. Never present an extrapolation as a completed run.
+
+The source-title relevance pilot uses only rows explicitly categorized as
+wrong entity/location by note keywords plus human-kept rows. It reports both
+the <=1% kept-image flag threshold selected on calibration entities and a
+fixed 10% human-review queue on unseen entities. Other rejected rows are
+excluded; the resulting precision is conditional on that restricted cohort.
+The reason categories are provisional because note keywords are not an
+independent adjudication. A failed threshold remains disabled in the pipeline.
 
 `scripts/build_processing_decisions.py` reports wall time for the technical
 decision gate over every manifest row and cross-tabulates its actions with
